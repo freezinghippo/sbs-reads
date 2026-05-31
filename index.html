@@ -84,8 +84,8 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .reader-title { font-size:23px; font-weight:900; line-height:1.25; color:var(--text); margin-bottom:18px; letter-spacing:-0.3px; }
 .reader-content { font-size:16px; line-height:1.75; color:var(--text2); }
 .reader-content p { margin-bottom:16px; }
-.reader-content h1,.reader-content h2,.reader-content h3 { color:var(--text); font-weight:800; line-height:1.3; margin:24px 0 12px; }
-.reader-content h1 { font-size:20px; } .reader-content h2 { font-size:18px; } .reader-content h3 { font-size:16px; }
+.reader-content h1,.reader-content h2,.reader-content h3 { color:var(--text)!important; font-weight:800!important; line-height:1.3; margin:24px 0 10px; }
+.reader-content h1 { font-size:21px; } .reader-content h2 { font-size:18px; } .reader-content h3 { font-size:16px; }
 .reader-content a { color:var(--accent3); text-decoration:none; word-break:break-word; }
 .reader-content img { max-width:100%; height:auto; border-radius:10px; margin:12px 0; }
 .reader-content ul,.reader-content ol { margin:0 0 16px 22px; }
@@ -304,38 +304,52 @@ function decodeEntities(s) {
     .replace(/&hellip;/g, '\u2026').replace(/&amp;/g, '&'); // amp last
 }
 
-// Minimal, safe-ish markdown -> HTML for article bodies.
+// Markdown -> HTML for article bodies. Processes line-by-line so headings
+// and short standalone lines (e.g. a one-letter grade) never get swallowed.
 function mdToHtml(md) {
-  // decode page entities first, THEN escape, so &#8217; -> ' (not literal)
-  let t = esc(decodeEntities(md));
-  // images ![alt](src)
-  t = t.replace(/!\[([^\]]*)\]\((https?:[^)\s]+)\)/g, '<img alt="$1" src="$2">');
-  // links [text](url)
-  t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  // headings
-  t = t.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
-       .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
-       .replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
-  // bold / italic
-  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-       .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
-  // blockquotes
-  t = t.replace(/^&gt;\s?(.+)$/gm, '<blockquote>$1</blockquote>');
-  // horizontal rules
-  t = t.replace(/^\s*([-*_])\1\1+\s*$/gm, '<hr>');
-  // split into blocks on blank lines, wrap loose text in <p>
-  const blocks = t.split(/\n{2,}/).map(b => {
-    const s = b.trim();
-    if (!s) return '';
-    if (/^<(h1|h2|h3|blockquote|hr|img|ul|ol)/.test(s)) return s;
-    // simple bullet list
-    if (/^[-*]\s+/m.test(s) && s.split('\n').every(line => /^[-*]\s+/.test(line.trim()) || !line.trim())) {
-      const items = s.split('\n').filter(x=>x.trim()).map(x => '<li>' + x.replace(/^[-*]\s+/, '') + '</li>').join('');
-      return '<ul>' + items + '</ul>';
+  const decoded = decodeEntities(md);
+  const lines = decoded.split('\n');
+  const out = [];
+  let para = [];       // buffer for consecutive plain-text lines
+  let listItems = [];  // buffer for consecutive bullet lines
+
+  const inline = (s) => {
+    // escape, then re-introduce links / bold / italic safely
+    let x = esc(s);
+    x = x.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    x = x.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    x = x.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
+    return x;
+  };
+  const flushPara = () => {
+    if (para.length) { out.push('<p>' + para.map(inline).join('<br>') + '</p>'); para = []; }
+  };
+  const flushList = () => {
+    if (listItems.length) { out.push('<ul>' + listItems.map(li => '<li>' + inline(li) + '</li>').join('') + '</ul>'); listItems = []; }
+  };
+
+  for (let raw of lines) {
+    const line = raw.trim();
+    if (!line) { flushPara(); flushList(); continue; }
+
+    let m;
+    if ((m = line.match(/^###\s+(.+)$/))) { flushPara(); flushList(); out.push('<h3>' + inline(m[1]) + '</h3>'); continue; }
+    if ((m = line.match(/^##\s+(.+)$/)))  { flushPara(); flushList(); out.push('<h2>' + inline(m[1]) + '</h2>'); continue; }
+    if ((m = line.match(/^#\s+(.+)$/)))   { flushPara(); flushList(); out.push('<h1>' + inline(m[1]) + '</h1>'); continue; }
+    if ((m = line.match(/^[-*]\s+(.+)$/))){ flushPara(); listItems.push(m[1]); continue; }
+    if ((m = line.match(/^>\s?(.+)$/)))   { flushPara(); flushList(); out.push('<blockquote>' + inline(m[1]) + '</blockquote>'); continue; }
+    if (/^[-*_]{3,}$/.test(line))         { flushPara(); flushList(); out.push('<hr>'); continue; }
+    if (/^!\[([^\]]*)\]\((https?:[^)\s]+)\)$/.test(line)) {
+      flushPara(); flushList();
+      out.push(line.replace(/^!\[([^\]]*)\]\((https?:[^)\s]+)\)$/, '<img alt="$1" src="$2">'));
+      continue;
     }
-    return '<p>' + s.replace(/\n/g, '<br>') + '</p>';
-  });
-  return blocks.join('\n');
+    // plain text line
+    flushList();
+    para.push(line);
+  }
+  flushPara(); flushList();
+  return out.join('\n');
 }
 
 // Handle a link shared into the app via Android share sheet
