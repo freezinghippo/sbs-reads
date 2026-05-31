@@ -67,12 +67,43 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 
 @keyframes slideIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
 .link-item { animation:slideIn 0.18s ease; }
+
+/* tappable open-affordance on rows */
+.link-actions { display:flex; align-items:center; gap:4px; flex-shrink:0; }
+.row-open { font-size:11px; font-weight:800; color:var(--accent3); border:1px solid rgba(108,255,184,0.3); background:rgba(108,255,184,0.06); padding:5px 10px; border-radius:8px; white-space:nowrap; }
+
+/* READER (full-screen subpage) */
+.reader { position:fixed; inset:0; background:var(--bg); z-index:400; display:flex; flex-direction:column; transform:translateX(100%); transition:transform 0.3s cubic-bezier(0.4,0,0.2,1); padding-top:var(--safe-top); }
+.reader.open { transform:translateX(0); }
+.reader-header { padding:11px 16px; display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.reader-back { display:flex; align-items:center; gap:6px; color:var(--accent3); font-weight:800; font-size:15px; cursor:pointer; flex-shrink:0; }
+.reader-domain { font-size:12px; color:var(--text3); font-weight:600; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.reader-orig { font-size:11px; font-weight:700; color:var(--accent); border:1px solid rgba(124,108,255,0.3); background:rgba(124,108,255,0.06); padding:5px 10px; border-radius:8px; cursor:pointer; flex-shrink:0; }
+.reader-body { flex:1; overflow-y:auto; padding:22px 20px calc(40px + var(--safe-bottom)); scrollbar-width:none; }
+.reader-body::-webkit-scrollbar { display:none; }
+.reader-title { font-size:23px; font-weight:900; line-height:1.25; color:var(--text); margin-bottom:18px; letter-spacing:-0.3px; }
+.reader-content { font-size:16px; line-height:1.75; color:var(--text2); }
+.reader-content p { margin-bottom:16px; }
+.reader-content h1,.reader-content h2,.reader-content h3 { color:var(--text); font-weight:800; line-height:1.3; margin:24px 0 12px; }
+.reader-content h1 { font-size:20px; } .reader-content h2 { font-size:18px; } .reader-content h3 { font-size:16px; }
+.reader-content a { color:var(--accent3); text-decoration:none; word-break:break-word; }
+.reader-content img { max-width:100%; height:auto; border-radius:10px; margin:12px 0; }
+.reader-content ul,.reader-content ol { margin:0 0 16px 22px; }
+.reader-content li { margin-bottom:7px; }
+.reader-content blockquote { border-left:3px solid var(--accent); padding-left:14px; margin:0 0 16px; color:var(--text3); font-style:italic; }
+.reader-content hr { border:none; border-top:1px solid var(--border); margin:22px 0; }
+.reader-loading { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:80px 30px; color:var(--text3); }
+.reader-spinner { width:34px; height:34px; border:3px solid var(--border); border-top-color:var(--accent3); border-radius:50%; animation:spin 0.8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.reader-error { padding:60px 30px; text-align:center; color:var(--text2); }
+.reader-error p { font-size:14px; line-height:1.7; margin-bottom:18px; }
+.reader-error-btn { display:inline-block; font-size:14px; font-weight:800; color:white; background:linear-gradient(135deg,var(--accent),var(--accent2)); padding:11px 22px; border-radius:11px; border:none; cursor:pointer; font-family:'Inter',sans-serif; }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v2</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v3</span></div>
   <span class="count" id="count">0 links</span>
 </div>
 
@@ -82,7 +113,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <button class="btn-paste" onclick="pasteFromClipboard()" title="Paste from clipboard">📋</button>
     <button class="btn-add" onclick="addLink()">Save</button>
   </div>
-  <div class="hint">Paste a link and tap Save, or share a link to <b>SB's Reads</b> from any app. Tap a saved link to open it · swipe left to delete.</div>
+  <div class="hint">Paste a link and tap Save, or share a link to <b>SB's Reads</b> from any app. Tap a saved link to read it in-app · swipe left to delete.</div>
 </div>
 
 <div class="search-wrap">
@@ -94,8 +125,19 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 
 <div class="toast" id="toast"></div>
 
+<!-- READER -->
+<div class="reader" id="reader">
+  <div class="reader-header">
+    <div class="reader-back" onclick="closeReader()">‹ Back</div>
+    <div class="reader-domain" id="readerDomain"></div>
+    <button class="reader-orig" id="readerOrig">Original ↗</button>
+  </div>
+  <div class="reader-body" id="readerBody"></div>
+</div>
+
 <script>
 const KEY = 'sbr_links';
+const WORKER = 'https://sbs-reads-worker.steveblekaitis.workers.dev';
 let links = [];
 
 function load() {
@@ -202,7 +244,85 @@ function render() {
 
 function openLink(id) {
   const l = links.find(l => l.id === id);
-  if (l) window.open(l.url, '_blank', 'noopener');
+  if (l) openReader(l);
+}
+
+// ---- IN-APP READER --------------------------------------------------------
+let currentReaderUrl = null;
+
+function openReader(l) {
+  currentReaderUrl = l.url;
+  document.getElementById('readerDomain').textContent = l.domain;
+  document.getElementById('readerOrig').onclick = () => window.open(l.url, '_blank', 'noopener');
+  document.getElementById('readerBody').innerHTML =
+    '<div class="reader-loading"><div class="reader-spinner"></div><div>Fetching article…</div></div>';
+  document.getElementById('reader').classList.add('open');
+  fetchArticle(l);
+}
+
+function closeReader() {
+  document.getElementById('reader').classList.remove('open');
+}
+
+async function fetchArticle(l) {
+  try {
+    const resp = await fetch(WORKER + '/article?url=' + encodeURIComponent(l.url));
+    const data = await resp.json();
+    // only render if user hasn't navigated away/opened another
+    if (currentReaderUrl !== l.url) return;
+    if (!data.ok || !data.text) { showReaderError(l); return; }
+    // store the fetched title back on the link so the list shows it too
+    if (data.title && (!l.title || l.title === l.domain)) {
+      l.title = data.title; save(); render();
+    }
+    document.getElementById('readerBody').innerHTML =
+      '<div class="reader-title">' + esc(data.title || l.domain) + '</div>' +
+      '<div class="reader-content">' + mdToHtml(data.text) + '</div>';
+    document.getElementById('readerBody').scrollTop = 0;
+  } catch(e) {
+    if (currentReaderUrl === l.url) showReaderError(l);
+  }
+}
+
+function showReaderError(l) {
+  document.getElementById('readerBody').innerHTML =
+    '<div class="reader-error"><p>Couldn\'t pull a clean reading version of this one.<br>' +
+    'It may be paywalled, login-only, or block readers.</p>' +
+    '<button class="reader-error-btn" onclick="window.open(\'' + esc(l.url) + '\',\'_blank\',\'noopener\')">Open original ↗</button></div>';
+}
+
+// Minimal, safe-ish markdown -> HTML for article bodies.
+function mdToHtml(md) {
+  // escape everything first, then re-introduce a few safe constructs
+  let t = esc(md);
+  // images ![alt](src)
+  t = t.replace(/!\[([^\]]*)\]\((https?:[^)\s]+)\)/g, '<img alt="$1" src="$2">');
+  // links [text](url)
+  t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // headings
+  t = t.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
+       .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
+       .replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+  // bold / italic
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+       .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
+  // blockquotes
+  t = t.replace(/^&gt;\s?(.+)$/gm, '<blockquote>$1</blockquote>');
+  // horizontal rules
+  t = t.replace(/^\s*([-*_])\1\1+\s*$/gm, '<hr>');
+  // split into blocks on blank lines, wrap loose text in <p>
+  const blocks = t.split(/\n{2,}/).map(b => {
+    const s = b.trim();
+    if (!s) return '';
+    if (/^<(h1|h2|h3|blockquote|hr|img|ul|ol)/.test(s)) return s;
+    // simple bullet list
+    if (/^[-*]\s+/m.test(s) && s.split('\n').every(line => /^[-*]\s+/.test(line.trim()) || !line.trim())) {
+      const items = s.split('\n').filter(x=>x.trim()).map(x => '<li>' + x.replace(/^[-*]\s+/, '') + '</li>').join('');
+      return '<ul>' + items + '</ul>';
+    }
+    return '<p>' + s.replace(/\n/g, '<br>') + '</p>';
+  });
+  return blocks.join('\n');
 }
 
 // Handle a link shared into the app via Android share sheet
@@ -293,6 +413,10 @@ load();
 render();
 setupSwipe();
 handleSharedLink();
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('reader').classList.contains('open')) closeReader();
+});
 </script>
 </body>
 </html>
