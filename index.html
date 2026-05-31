@@ -183,7 +183,7 @@ function render() {
   );
   document.getElementById('count').textContent = links.length + ' link' + (links.length!==1?'s':'');
   if (!filtered.length) {
-    list.innerHTML = `<div class="empty"><div class="icon">${q?'⌕':'🔖'}</div><p>${q?'No links match your search.':'No saved links yet.<br>Paste a link above, or share one into SB\\'s Reads.'}</p></div>`;
+    list.innerHTML = `<div class="empty"><div class="icon">${q?'⌕':'🔖'}</div><p>${q?'No links match your search.':'No saved links yet.<br>Paste a link above, or share one into the app.'}</p></div>`;
     return;
   }
   list.innerHTML = filtered.map(l => `
