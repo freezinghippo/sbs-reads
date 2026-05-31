@@ -102,7 +102,10 @@ function load() {
   try { links = JSON.parse(localStorage.getItem(KEY) || '[]'); }
   catch(e) { links = []; }
 }
-function save() { localStorage.setItem(KEY, JSON.stringify(links)); }
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(links)); }
+  catch(e) { /* storage blocked (e.g. preview sandbox) — links still live in memory this session */ }
+}
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
