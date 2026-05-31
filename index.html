@@ -273,10 +273,10 @@ async function fetchArticle(l) {
     if (!data.ok || !data.text) { showReaderError(l); return; }
     // store the fetched title back on the link so the list shows it too
     if (data.title && (!l.title || l.title === l.domain)) {
-      l.title = data.title; save(); render();
+      l.title = decodeEntities(data.title); save(); render();
     }
     document.getElementById('readerBody').innerHTML =
-      '<div class="reader-title">' + esc(data.title || l.domain) + '</div>' +
+      '<div class="reader-title">' + esc(decodeEntities(data.title || l.domain)) + '</div>' +
       '<div class="reader-content">' + mdToHtml(data.text) + '</div>';
     document.getElementById('readerBody').scrollTop = 0;
   } catch(e) {
@@ -291,10 +291,23 @@ function showReaderError(l) {
     '<button class="reader-error-btn" onclick="window.open(\'' + esc(l.url) + '\',\'_blank\',\'noopener\')">Open original ↗</button></div>';
 }
 
+// Decode HTML entities (the Worker passes through what the page contained).
+function decodeEntities(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ').replace(/&mdash;/g, '\u2014').replace(/&ndash;/g, '\u2013')
+    .replace(/&lsquo;/g, '\u2018').replace(/&rsquo;/g, '\u2019')
+    .replace(/&ldquo;/g, '\u201C').replace(/&rdquo;/g, '\u201D')
+    .replace(/&hellip;/g, '\u2026').replace(/&amp;/g, '&'); // amp last
+}
+
 // Minimal, safe-ish markdown -> HTML for article bodies.
 function mdToHtml(md) {
-  // escape everything first, then re-introduce a few safe constructs
-  let t = esc(md);
+  // decode page entities first, THEN escape, so &#8217; -> ' (not literal)
+  let t = esc(decodeEntities(md));
   // images ![alt](src)
   t = t.replace(/!\[([^\]]*)\]\((https?:[^)\s]+)\)/g, '<img alt="$1" src="$2">');
   // links [text](url)
