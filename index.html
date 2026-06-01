@@ -150,7 +150,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v11</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v12</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <button class="hl-open-btn" onclick="openNotes()">★ Highlights</button>
     <span class="count" id="count">0 links</span>
@@ -182,7 +182,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
   <div class="reader-header">
     <div class="reader-back" onclick="closeReader()">‹ Back</div>
     <div class="reader-domain" id="readerDomain"></div>
-    <button class="reader-star" id="readerStar" onmousedown="grabSelection(event)" ontouchstart="grabSelection(event)" onclick="saveHighlight()" title="Save selected text as a highlight">★</button>
+    <button class="reader-star" id="readerStar" title="Save selected text as a highlight">★</button>
     <button class="reader-orig" id="readerOrig">Original ↗</button>
   </div>
   <div class="reader-toggle">
@@ -395,6 +395,7 @@ function saveHighlights(){ try { localStorage.setItem(HL_KEY, JSON.stringify(hig
 function openReader(l) {
   currentReaderUrl = l.url;
   currentReaderLink = l;
+  pendingHighlight = '';
   readerState = { title:'', fullText:'', fullHtml:'', summaryHtml:'', summaryMd:'', summaryLoaded:false, view:'full' };
   document.getElementById('readerDomain').textContent = l.domain;
   document.getElementById('readerOrig').onclick = () => window.open(l.url, '_blank', 'noopener');
@@ -556,17 +557,47 @@ function stopSpeech() {
 }
 
 // ---- HIGHLIGHTS -----------------------------------------------------------
-// Selection is captured the instant the ★ button is pressed (grabSelection),
-// which is reliable across mobile + desktop without fragile selection events.
+// Selection is captured continuously and on button press, so the ★ button
+// reliably saves the highlighted text across mobile + desktop.
 
 let pendingHighlight = '';
-function grabSelection(e) {
-  // capture the selected text the instant the button is pressed,
-  // before the tap collapses the selection
+
+// Capture the current selection text. Called early (on press) so the
+// selection isn't lost when focus moves to the button.
+function captureSelection() {
   const sel = window.getSelection();
-  pendingHighlight = sel ? sel.toString().trim() : '';
-  if (e) e.preventDefault();
+  const t = sel ? sel.toString().trim() : '';
+  if (t) pendingHighlight = t;
 }
+
+// Wire the star button with both touch and mouse paths.
+(function wireStar(){
+  function attach() {
+    const star = document.getElementById('readerStar');
+    if (!star) { setTimeout(attach, 200); return; }
+    // capture selection the instant the press begins (before tap clears it)
+    star.addEventListener('pointerdown', captureSelection, true);
+    star.addEventListener('touchstart', captureSelection, {capture:true, passive:true});
+    star.addEventListener('mousedown', captureSelection, true);
+    // perform the save on release/click
+    star.addEventListener('click', function(e){ e.preventDefault(); saveHighlight(); });
+  }
+  attach();
+})();
+
+// Continuously remember the last real selection inside the reader, so the
+// star always has the right text even if press-timing on mobile is finicky.
+document.addEventListener('selectionchange', function(){
+  if (!document.getElementById('reader').classList.contains('open')) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const t = sel.toString().trim();
+  if (t.length > 1) {
+    // confirm selection is within the reader body
+    let node = sel.anchorNode;
+    while (node) { if (node.id === 'readerBody') { pendingHighlight = t; break; } node = node.parentNode; }
+  }
+});
 
 function saveHighlight() {
   const text = pendingHighlight || (window.getSelection() ? window.getSelection().toString().trim() : '');
