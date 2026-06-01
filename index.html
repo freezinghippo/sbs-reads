@@ -147,7 +147,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v8</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v9</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <button class="hl-open-btn" onclick="openNotes()">★ Highlights</button>
     <span class="count" id="count">0 links</span>
@@ -194,7 +194,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <span class="audio-pos" id="audioPos">0%</span>
   </div>
   <div class="reader-body" id="readerBody"></div>
-  <div class="hl-toolbar" id="hlToolbar"><button onclick="saveHighlight()">★ Save highlight</button></div>
+  <div class="hl-toolbar" id="hlToolbar"><button onmousedown="grabSelection(event)" ontouchstart="grabSelection(event)" onclick="saveHighlight()">★ Save highlight</button></div>
 </div>
 
 <!-- HIGHLIGHTS VIEW -->
@@ -459,28 +459,52 @@ function splitForSpeech(text) {
   return chunks;
 }
 
+let paused = false;
+
 function toggleListen() {
   if (!('speechSynthesis' in window)) { showToast('Voice not supported on this browser'); return; }
-  if (speaking) { stopSpeech(); return; }
+  // resume from pause
+  if (speaking && paused) {
+    paused = false;
+    setListenBtn(true);
+    speakNext();
+    return;
+  }
+  // pause while playing
+  if (speaking && !paused) {
+    paused = true;
+    setListenBtn(false);
+    try { window.speechSynthesis.cancel(); } catch(e) {}
+    return;
+  }
+  // fresh start
   const text = plainTextForSpeech();
   if (!text || text.length < 4) { showToast('Nothing to read yet'); return; }
   speechChunks = splitForSpeech(text);
   speechIdx = 0;
   speaking = true;
-  document.getElementById('rtListen').classList.add('playing');
-  document.getElementById('rtListen').innerHTML = '⏸ Stop';
+  paused = false;
+  setListenBtn(true);
   document.getElementById('audioBar').style.display = 'flex';
   updateSeek();
   speakNext();
 }
 
+function setListenBtn(playing) {
+  const btn = document.getElementById('rtListen');
+  if (!btn) return;
+  if (playing) { btn.classList.add('playing'); btn.innerHTML = '⏸ Pause'; }
+  else { btn.classList.remove('playing'); btn.innerHTML = '▶ Play'; }
+}
+
 function speakNext() {
-  if (!speaking || speechIdx >= speechChunks.length) { stopSpeech(); return; }
+  if (!speaking || paused) return;
+  if (speechIdx >= speechChunks.length) { endPlayback(); return; }
   updateSeek();
   const u = new SpeechSynthesisUtterance(speechChunks[speechIdx]);
   u.rate = speechRate; u.pitch = 1.0; u.lang = 'en-US';
-  u.onend = () => { if (speaking) { speechIdx++; speakNext(); } };
-  u.onerror = () => { if (speaking) { speechIdx++; speakNext(); } };
+  u.onend = () => { if (speaking && !paused) { speechIdx++; speakNext(); } };
+  u.onerror = () => { if (speaking && !paused) { speechIdx++; speakNext(); } };
   window.speechSynthesis.speak(u);
 }
 
@@ -495,8 +519,9 @@ function updateSeek() {
 
 function skipChunk(dir) {
   if (!speaking) return;
-  speechIdx = Math.max(0, Math.min(speechChunks.length - 1, speechIdx + dir));
+  speechIdx = Math.max(0, Math.min((speechChunks.length||1) - 1, speechIdx + dir));
   try { window.speechSynthesis.cancel(); } catch(e) {}
+  paused = false; setListenBtn(true);
   speakNext();
 }
 
@@ -504,34 +529,63 @@ function seekTo(val) {
   if (!speaking || !speechChunks.length) return;
   speechIdx = Math.floor((val / 100) * speechChunks.length);
   if (speechIdx >= speechChunks.length) speechIdx = speechChunks.length - 1;
+  if (speechIdx < 0) speechIdx = 0;
   try { window.speechSynthesis.cancel(); } catch(e) {}
+  paused = false; setListenBtn(true);
   speakNext();
 }
 
+// playback reached the end naturally — reset but keep bar so they can replay
+function endPlayback() {
+  speaking = false; paused = false;
+  setListenBtn(false);
+  speechIdx = 0;
+  updateSeek();
+}
+
+// full teardown (leaving the reader)
 function stopSpeech() {
-  speaking = false;
+  speaking = false; paused = false;
   try { window.speechSynthesis.cancel(); } catch(e) {}
-  const btn = document.getElementById('rtListen');
-  if (btn) { btn.classList.remove('playing'); btn.innerHTML = '▶ Listen'; }
+  setListenBtn(false);
   const bar = document.getElementById('audioBar');
   if (bar) bar.style.display = 'none';
 }
 
 // ---- HIGHLIGHTS -----------------------------------------------------------
-function handleSelection() {
+function checkSelection() {
   const sel = window.getSelection();
   const text = sel ? sel.toString().trim() : '';
   const tb = document.getElementById('hlToolbar');
-  // only inside the reader content and only when there's a real selection
-  const inReader = document.getElementById('reader').classList.contains('open');
-  if (inReader && text.length > 3) tb.classList.add('show');
+  if (!tb) return;
+  const readerOpen = document.getElementById('reader').classList.contains('open');
+  // selection must be inside the reader body
+  let inBody = false;
+  if (sel && sel.rangeCount && readerOpen) {
+    let node = sel.anchorNode;
+    while (node) {
+      if (node.id === 'readerBody') { inBody = true; break; }
+      node = node.parentNode;
+    }
+  }
+  if (inBody && text.length > 3) tb.classList.add('show');
   else tb.classList.remove('show');
 }
-document.addEventListener('selectionchange', handleSelection);
+// fire after the user finishes selecting (works on touch + mouse)
+document.addEventListener('touchend', () => setTimeout(checkSelection, 60), {passive:true});
+document.addEventListener('mouseup', () => setTimeout(checkSelection, 10));
+
+let pendingHighlight = '';
+function grabSelection(e) {
+  // capture the selected text the instant the button is pressed,
+  // before the tap collapses the selection
+  const sel = window.getSelection();
+  pendingHighlight = sel ? sel.toString().trim() : '';
+  if (e) e.preventDefault();
+}
 
 function saveHighlight() {
-  const sel = window.getSelection();
-  const text = sel ? sel.toString().trim() : '';
+  const text = pendingHighlight || (window.getSelection() ? window.getSelection().toString().trim() : '');
   if (!text || !currentReaderLink) { document.getElementById('hlToolbar').classList.remove('show'); return; }
   highlights.unshift({
     id: Date.now(),
@@ -542,8 +596,9 @@ function saveHighlight() {
     addedAt: Date.now(),
   });
   saveHighlights();
+  pendingHighlight = '';
   document.getElementById('hlToolbar').classList.remove('show');
-  try { sel.removeAllRanges(); } catch(e){}
+  try { window.getSelection().removeAllRanges(); } catch(e){}
   showToast('★ Highlight saved');
 }
 
