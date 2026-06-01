@@ -44,6 +44,15 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .search-input::placeholder { color:var(--text3); }
 .search-input:focus { border-color:var(--accent); }
 
+/* CATEGORY FILTER PILLS */
+.cat-filters { display:flex; gap:7px; overflow-x:auto; scrollbar-width:none; padding:0 18px 8px; flex-shrink:0; }
+.cat-filters::-webkit-scrollbar { display:none; }
+.cat-pill { flex-shrink:0; padding:5px 12px; border-radius:20px; font-size:11px; border:1.5px solid var(--border); background:var(--surface); color:var(--text2); cursor:pointer; font-weight:700; white-space:nowrap; transition:all 0.15s; }
+.cat-pill.all-active { background:var(--accent); border-color:var(--accent); color:#fff; }
+.cat-pill.active { color:#0d0d15; border-color:transparent; }
+.cat-tag { font-size:9px; font-weight:800; padding:1px 7px; border-radius:4px; letter-spacing:0.3px; line-height:1.7; flex-shrink:0; }
+.cat-tag.pending { background:var(--surface2); color:var(--text3); border:1px solid var(--border); }
+
 .list-wrap { flex:1; overflow-y:auto; overflow-x:hidden; padding-bottom:30px; scrollbar-width:none; min-height:0; }
 .list-wrap::-webkit-scrollbar { display:none; }
 
@@ -86,6 +95,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .rt-btn.active { border-color:var(--accent3); background:rgba(108,255,184,0.08); color:var(--accent3); }
 .rt-listen { flex:0 0 auto; padding-left:14px; padding-right:14px; border-color:rgba(124,108,255,0.4); color:var(--accent); }
 .rt-listen.playing { border-color:var(--accent); background:rgba(124,108,255,0.12); color:var(--accent); }
+.rt-speed { flex:0 0 auto; padding-left:11px; padding-right:11px; min-width:46px; border-color:var(--border); color:var(--text2); }
 .summary-meta { font-size:11px; color:var(--text3); font-weight:600; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border); }
 .reader-title { font-size:23px; font-weight:900; line-height:1.25; color:var(--text); margin-bottom:18px; letter-spacing:-0.3px; }
 .reader-content { font-size:16px; line-height:1.75; color:var(--text2); }
@@ -109,7 +119,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v5</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v7</span></div>
   <span class="count" id="count">0 links</span>
 </div>
 
@@ -127,6 +137,8 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
   <input class="search-input" id="searchInput" placeholder="search saved links..." oninput="render()">
 </div>
 
+<div class="cat-filters" id="catFilters"></div>
+
 <div class="list-wrap" id="list"></div>
 
 <div class="toast" id="toast"></div>
@@ -142,6 +154,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <button class="rt-btn active" id="rtFull" onclick="showFull()">📄 Full</button>
     <button class="rt-btn" id="rtSummary" onclick="showSummary()">✦ Summary</button>
     <button class="rt-btn rt-listen" id="rtListen" onclick="toggleListen()">▶ Listen</button>
+    <button class="rt-btn rt-speed" id="rtSpeed" onclick="cycleSpeed()">1×</button>
   </div>
   <div class="reader-body" id="readerBody"></div>
 </div>
@@ -149,6 +162,20 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <script>
 const KEY = 'sbr_links';
 const WORKER = 'https://sbs-reads-worker.steveblekaitis.workers.dev';
+const CATS = [
+  { name:'World News',      color:'#54a0ff' },
+  { name:'Pol & Govt',      color:'#ff6b6b' },
+  { name:'Biz & Econ',      color:'#ffaa44' },
+  { name:'Finance',         color:'#ffd166' },
+  { name:'Tech & Science',  color:'#7c6cff' },
+  { name:'Health',          color:'#6cffb8' },
+  { name:'Travel',          color:'#4ecdc4' },
+  { name:'Food & Drink',    color:'#ff9ff3' },
+  { name:'Local / Toronto', color:'#06d6a0' },
+  { name:'Other',           color:'#a8a8c0' },
+];
+function catColor(name){ return (CATS.find(c=>c.name===name)||{}).color || '#a8a8c0'; }
+let activeCat = null;
 let links = [];
 
 function load() {
@@ -194,9 +221,26 @@ function saveLink(rawUrl, title) {
   const url = normalizeUrl(rawUrl);
   if (!url) return { ok:false, reason:'invalid' };
   if (links.some(l => l.url === url)) return { ok:false, reason:'dupe' };
-  links.unshift({ id: Date.now(), url, domain: domainOf(url), title: (title||'').trim() || null, addedAt: Date.now() });
+  const link = { id: Date.now(), url, domain: domainOf(url), title: (title||'').trim() || null, cat: null, addedAt: Date.now() };
+  links.unshift(link);
   save();
-  return { ok:true };
+  return { ok:true, link };
+}
+
+// Ask the Worker to assign a category. text optional (Worker quick-fetches if absent).
+async function categorizeLink(link, text) {
+  try {
+    const resp = await fetch(WORKER + '/categorize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: link.url, title: link.title || '', text: text || '' }),
+    });
+    const data = await resp.json();
+    if (data.ok && data.category) {
+      const l = links.find(x => x.id === link.id);
+      if (l) { l.cat = data.category; save(); buildCatFilters(); render(); }
+    }
+  } catch(e) { /* leave untagged; will retry when read */ }
 }
 
 function addLink() {
@@ -206,7 +250,8 @@ function addLink() {
   if (!res.ok && res.reason === 'dupe') { showToast('Already saved'); input.value=''; return; }
   input.value = '';
   render();
-  showToast('Saved ✓');
+  showToast('Saved ✓ · tagging…');
+  categorizeLink(res.link);
 }
 
 async function pasteFromClipboard() {
@@ -231,26 +276,53 @@ function deleteLink(id) {
   showUndoToast(removed, idx);
 }
 
+function buildCatFilters() {
+  const el = document.getElementById('catFilters');
+  if (!el) return;
+  // only show categories that actually have links, plus All
+  const present = new Set(links.map(l => l.cat).filter(Boolean));
+  let html = `<button class="cat-pill ${activeCat===null?'all-active':''}" onclick="setCat(null)">All</button>`;
+  CATS.forEach(c => {
+    if (!present.has(c.name)) return;
+    const on = activeCat === c.name;
+    html += `<button class="cat-pill ${on?'active':''}" style="${on?`background:${c.color};border-color:transparent`:''}" onclick="setCat('${c.name.replace(/'/g,"\\'")}')">${esc(c.name)}</button>`;
+  });
+  el.innerHTML = html;
+}
+
+function setCat(name) {
+  activeCat = (activeCat === name) ? null : name;
+  buildCatFilters();
+  render();
+}
+
 function render() {
   const list = document.getElementById('list');
   const q = document.getElementById('searchInput').value.toLowerCase().trim();
-  let filtered = links.filter(l =>
-    !q || l.url.toLowerCase().includes(q) || l.domain.toLowerCase().includes(q) || (l.title||'').toLowerCase().includes(q)
-  );
+  let filtered = links.filter(l => {
+    if (activeCat && l.cat !== activeCat) return false;
+    if (q && !(l.url.toLowerCase().includes(q) || l.domain.toLowerCase().includes(q) || (l.title||'').toLowerCase().includes(q))) return false;
+    return true;
+  });
   document.getElementById('count').textContent = links.length + ' link' + (links.length!==1?'s':'');
   if (!filtered.length) {
-    list.innerHTML = `<div class="empty"><div class="icon">${q?'⌕':'🔖'}</div><p>${q?'No links match your search.':'No saved links yet.<br>Paste a link above, or share one into the app.'}</p></div>`;
+    list.innerHTML = `<div class="empty"><div class="icon">${q||activeCat?'⌕':'🔖'}</div><p>${q||activeCat?'No links match.':'No saved links yet.<br>Paste a link above, or share one into the app.'}</p></div>`;
     return;
   }
-  list.innerHTML = filtered.map(l => `
+  list.innerHTML = filtered.map(l => {
+    const tag = l.cat
+      ? `<span class="cat-tag" style="background:${catColor(l.cat)};color:#0d0d15">${esc(l.cat)}</span>`
+      : `<span class="cat-tag pending">…</span>`;
+    return `
     <div class="link-item" data-id="${l.id}" onclick="openLink(${l.id})">
       <div class="fav"><img src="${esc(faviconOf(l.url))}" onerror="this.style.display='none';this.parentNode.innerHTML='<span class=&quot;fav-fallback&quot;>🔗</span>'"></div>
       <div class="link-body">
         <div class="link-title">${esc(l.title || l.domain)}</div>
-        <div class="link-url">${esc(l.url)}</div>
+        <div class="task-meta" style="display:flex;gap:7px;align-items:center;margin-top:4px">${tag}<span class="link-url" style="margin-top:0">${esc(l.domain)}</span></div>
       </div>
       <span class="link-time">${timeAgo(l.addedAt)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function openLink(id) {
@@ -283,6 +355,22 @@ function closeReader() {
 let speaking = false;
 let speechChunks = [];
 let speechIdx = 0;
+const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
+let speechRate = parseFloat(localStorage.getItem('sbr_rate') || '1') || 1;
+
+function cycleSpeed() {
+  let i = SPEEDS.indexOf(speechRate);
+  i = (i + 1) % SPEEDS.length;
+  speechRate = SPEEDS[i];
+  localStorage.setItem('sbr_rate', String(speechRate));
+  const btn = document.getElementById('rtSpeed');
+  if (btn) btn.textContent = (speechRate === 1 ? '1' : speechRate) + '×';
+  // if currently playing, restart current chunk at new speed for immediate effect
+  if (speaking) {
+    try { window.speechSynthesis.cancel(); } catch(e) {}
+    speakNext();
+  }
+}
 
 function plainTextForSpeech() {
   // read whichever view is active; strip markdown so it isn't spoken literally
@@ -331,7 +419,7 @@ function toggleListen() {
 function speakNext() {
   if (!speaking || speechIdx >= speechChunks.length) { stopSpeech(); return; }
   const u = new SpeechSynthesisUtterance(speechChunks[speechIdx]);
-  u.rate = 1.0; u.pitch = 1.0; u.lang = 'en-US';
+  u.rate = speechRate; u.pitch = 1.0; u.lang = 'en-US';
   u.onend = () => { if (speaking) { speechIdx++; speakNext(); } };
   u.onerror = () => { if (speaking) { speechIdx++; speakNext(); } };
   window.speechSynthesis.speak(u);
@@ -360,6 +448,10 @@ async function fetchArticle(l) {
     }
     readerState.title = decodeEntities(data.title || l.domain);
     readerState.fullText = data.text;
+    // self-correct / fill category now that we have real article text
+    if (!l.cat || l.cat === 'Other') {
+      categorizeLink(l, data.text);
+    }
     readerState.fullHtml =
       '<div class="reader-title">' + esc(readerState.title) + '</div>' +
       '<div class="reader-content">' + mdToHtml(data.text) + '</div>';
@@ -502,7 +594,7 @@ function handleSharedLink() {
   if (!shared) return;
   const res = saveLink(shared, title);
   render();
-  if (res.ok) showToast('Shared link saved ✓');
+  if (res.ok) { showToast('Shared link saved ✓'); categorizeLink(res.link); }
   else if (res.reason === 'dupe') showToast('Already in your list');
   else showToast('Could not read that shared link');
 }
@@ -578,8 +670,10 @@ function showUndoToast(removed, idx) {
 
 load();
 render();
+buildCatFilters();
 setupSwipe();
 handleSharedLink();
+(function initSpeedBtn(){ const b=document.getElementById('rtSpeed'); if(b) b.textContent=(speechRate===1?'1':speechRate)+'×'; })();
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && document.getElementById('reader').classList.contains('open')) closeReader();
