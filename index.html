@@ -191,7 +191,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v15</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v16</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <span class="count" id="count">0 links</span>
     <button class="hamburger-btn" onclick="openMenu()">☰</button>
@@ -223,7 +223,6 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <div class="add-wrap">
   <div class="add-row">
     <input class="add-input" id="urlInput" placeholder="paste an article link..." inputmode="url" onkeydown="if(event.key==='Enter')addLink()">
-    <button class="btn-paste" onclick="pasteFromClipboard()" title="Paste from clipboard">📋</button>
     <button class="btn-add" onclick="addLink()">Save</button>
   </div>
   <div class="hint">Paste a link and tap Save, or share a link to <b>SB's Reads</b> from any app. Tap a saved link to read it in-app · swipe left to delete.</div>
@@ -452,7 +451,7 @@ async function syncNow(mergeFirst) {
     }
     // push merged result back
     const put = await fetch(WORKER + '/sync?code=' + encodeURIComponent(syncCode), {
-      method: 'PUT',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ links, highlights }),
     });
@@ -826,7 +825,10 @@ function speakNext() {
   if (speechIdx >= speechChunks.length) { endPlayback(); return; }
   if (!_suppressSeekUpdate) updateSeek();
   const u = new SpeechSynthesisUtterance(speechChunks[speechIdx]);
-  u.rate = speechRate; u.pitch = 1.0; u.lang = 'en-US';
+  // iOS speech engine runs noticeably faster for the same rate value — scale it down
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  u.rate = isIOS ? (1 + (speechRate - 1) * 0.55) : speechRate;
+  u.pitch = 1.0; u.lang = 'en-US';
   // token so a canceled/replaced utterance can't advance the index
   const myToken = ++speechToken;
   u.onend = () => { if (speaking && !paused && myToken === speechToken) { speechIdx++; speakNext(); } };
