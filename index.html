@@ -191,7 +191,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v14</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v15</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <span class="count" id="count">0 links</span>
     <button class="hamburger-btn" onclick="openMenu()">☰</button>
@@ -204,6 +204,9 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <div class="menu-header">
       <span class="menu-title">Menu</span>
       <span class="menu-close" onclick="closeMenu()">✕</span>
+    </div>
+    <div class="menu-item" onclick="closeMenu();openSync()">
+      <span class="menu-ico">☁</span><div><div class="menu-item-t">Cloud Sync</div><div class="menu-item-s" id="menuSyncStatus">Not set up</div></div>
     </div>
     <div class="menu-item" onclick="closeMenu();openNotes()">
       <span class="menu-ico">★</span><div><div class="menu-item-t">Highlights</div><div class="menu-item-s" id="menuHlCount">0 saved</div></div>
@@ -250,6 +253,24 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <div class="confirm-btns">
       <button class="confirm-cancel" onclick="closeConfirm()">Cancel</button>
       <button class="confirm-ok" id="confirmOk">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- SYNC DIALOG -->
+<div class="confirm-overlay" id="syncOverlay">
+  <div class="confirm-box" style="max-width:380px">
+    <div style="font-size:17px;font-weight:900;color:var(--text);margin-bottom:6px;text-align:center">☁ Cloud Sync</div>
+    <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:16px;text-align:center">Enter the same code on each device to share one list. Survives cache clears and syncs across phone, laptop, and tablet.</div>
+    <input class="add-input" id="syncCodeInput" placeholder="your-sync-code" style="margin-bottom:10px;text-align:center" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="confirm-cancel" style="flex:1" onclick="generateSyncCode()">🎲 Generate</button>
+      <button class="confirm-ok" style="flex:1;background:var(--accent3);color:#0d0d15" onclick="connectSync()">Connect</button>
+    </div>
+    <div id="syncInfo" style="font-size:11px;color:var(--text3);text-align:center;line-height:1.6;margin-bottom:12px"></div>
+    <div style="display:flex;gap:8px">
+      <button class="confirm-cancel" style="flex:1" onclick="closeSync()">Close</button>
+      <button class="confirm-cancel" id="syncDisconnectBtn" style="flex:1;display:none;border-color:rgba(255,51,85,0.3);color:#ff3355" onclick="disconnectSync()">Disconnect</button>
     </div>
   </div>
 </div>
@@ -316,6 +337,129 @@ function save() {
   try { localStorage.setItem(KEY, JSON.stringify(links)); }
   catch(e) { /* storage blocked (e.g. preview sandbox) — links still live in memory this session */ }
   try { autoBackup(); } catch(e) {}
+  scheduleSyncPush();
+}
+
+let _syncTimer = null;
+function scheduleSyncPush() {
+  if (typeof syncCode === 'undefined' || !syncCode) return;
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(() => { syncNow(false); }, 1500);
+}
+
+// ---- CLOUD SYNC -----------------------------------------------------------
+let syncCode = localStorage.getItem('sbr_synccode') || null;
+let syncing = false;
+
+function openSync() {
+  document.getElementById('syncCodeInput').value = syncCode || '';
+  updateSyncInfo();
+  document.getElementById('syncOverlay').classList.add('open');
+}
+function closeSync() { document.getElementById('syncOverlay').classList.remove('open'); }
+
+function updateSyncInfo() {
+  const info = document.getElementById('syncInfo');
+  const dis = document.getElementById('syncDisconnectBtn');
+  const menuStatus = document.getElementById('menuSyncStatus');
+  if (syncCode) {
+    info.innerHTML = 'Connected as <b style="color:var(--accent3)">' + esc(syncCode) + '</b><br>Enter this same code on your other devices.';
+    if (dis) dis.style.display = 'block';
+    if (menuStatus) menuStatus.textContent = 'On · ' + syncCode;
+  } else {
+    info.textContent = '';
+    if (dis) dis.style.display = 'none';
+    if (menuStatus) menuStatus.textContent = 'Not set up';
+  }
+}
+
+function generateSyncCode() {
+  const rnd = Math.random().toString(36).slice(2, 7);
+  document.getElementById('syncCodeInput').value = 'sb-' + rnd;
+}
+
+async function connectSync() {
+  const code = document.getElementById('syncCodeInput').value.trim().toLowerCase();
+  if (!/^[a-z0-9-]{4,40}$/.test(code)) { showToast('Code: letters, numbers, dashes (4+ chars)'); return; }
+  syncCode = code;
+  localStorage.setItem('sbr_synccode', code);
+  updateSyncInfo();
+  showToast('Connecting…');
+  // first connect = MERGE local + cloud so nothing is lost
+  await syncNow(true);
+  showToast('☁ Synced');
+  closeSync();
+}
+
+function disconnectSync() {
+  askConfirm('Stop syncing on this device? Your links stay here, but won\'t sync anymore.', () => {
+    syncCode = null;
+    localStorage.removeItem('sbr_synccode');
+    updateSyncInfo();
+    showToast('Sync off');
+  }, 'Disconnect');
+}
+
+// merge two link arrays by url (keep newest fields), dedupe
+function mergeLinks(a, b) {
+  const map = new Map();
+  [...a, ...b].forEach(l => {
+    if (!l || !l.url) return;
+    const ex = map.get(l.url);
+    if (!ex) { map.set(l.url, l); }
+    else {
+      // prefer the one with a real title/cat/read flag/words
+      map.set(l.url, {
+        ...ex, ...l,
+        title: l.title || ex.title,
+        cat: l.cat || ex.cat,
+        words: l.words || ex.words,
+        read: ex.read || l.read,
+        addedAt: Math.min(ex.addedAt||Date.now(), l.addedAt||Date.now()),
+      });
+    }
+  });
+  return [...map.values()].sort((x,y) => (y.addedAt||0) - (x.addedAt||0));
+}
+function mergeHighlights(a, b) {
+  const map = new Map();
+  [...a, ...b].forEach(h => { if (h && h.id) map.set(h.id, h); });
+  return [...map.values()].sort((x,y) => (y.addedAt||0) - (x.addedAt||0));
+}
+
+async function syncNow(mergeFirst) {
+  if (!syncCode || syncing) return;
+  syncing = true;
+  try {
+    // pull cloud
+    const r = await fetch(WORKER + '/sync?code=' + encodeURIComponent(syncCode));
+    const res = await r.json();
+    if (res.ok && res.found && res.data) {
+      if (mergeFirst) {
+        links = mergeLinks(links, res.data.links || []);
+        highlights = mergeHighlights(highlights, res.data.highlights || []);
+        save(); saveHighlights(); buildCatFilters(); render();
+      } else {
+        // routine: take cloud if it's newer than our last push
+        const cloudTime = res.data.updatedAt || 0;
+        const localTime = parseInt(localStorage.getItem('sbr_lastpush') || '0');
+        if (cloudTime > localTime) {
+          links = mergeLinks(links, res.data.links || []);
+          highlights = mergeHighlights(highlights, res.data.highlights || []);
+          save(); saveHighlights(); buildCatFilters(); render();
+        }
+      }
+    }
+    // push merged result back
+    const put = await fetch(WORKER + '/sync?code=' + encodeURIComponent(syncCode), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ links, highlights }),
+    });
+    const putRes = await put.json();
+    if (putRes.ok) localStorage.setItem('sbr_lastpush', String(putRes.updatedAt || Date.now()));
+  } catch(e) { /* offline or worker down — keep working locally */ }
+  syncing = false;
 }
 
 // ---- MENU -----------------------------------------------------------------
@@ -937,9 +1081,12 @@ function retrySummary() {
 
 function showReaderError(l) {
   document.getElementById('readerBody').innerHTML =
-    '<div class="reader-error"><p>Couldn\'t pull a clean reading version of this one.<br>' +
-    'It may be paywalled, login-only, or block readers.</p>' +
-    '<button class="reader-error-btn" onclick="window.open(\'' + esc(l.url) + '\',\'_blank\',\'noopener\')">Open original ↗</button></div>';
+    '<div class="reader-error">' +
+    '<div style="font-size:34px;margin-bottom:12px">🔒</div>' +
+    '<p style="font-weight:700;color:var(--text);margin-bottom:6px">Can\'t show this one in-app</p>' +
+    '<p style="font-size:13px;color:var(--text2);margin-bottom:4px">It\'s likely paywalled or login-only. If you have access (a subscription or account), open it on the original site and you\'ll be signed in there.</p>' +
+    '<button class="reader-error-btn" style="margin-top:16px" onclick="window.open(\'' + esc(l.url) + '\',\'_blank\',\'noopener\')">Open on original site ↗</button>' +
+    '</div>';
 }
 
 // Decode HTML entities (the Worker passes through what the page contained).
@@ -1098,6 +1245,11 @@ buildCatFilters();
 setupSwipe();
 handleSharedLink();
 (function initSpeedBtn(){ const b=document.getElementById('rtSpeed'); if(b) b.textContent=(speechRate===1?'1':speechRate)+'×'; })();
+// cloud sync: reflect status and pull latest on launch
+updateSyncInfo();
+if (syncCode) { syncNow(true); }
+// also pull when the app regains focus (returning from another app/device)
+document.addEventListener('visibilitychange', () => { if (!document.hidden && syncCode) syncNow(false); });
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && document.getElementById('reader').classList.contains('open')) closeReader();
