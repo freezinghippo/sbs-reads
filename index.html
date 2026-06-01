@@ -84,6 +84,8 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .reader-toggle { display:flex; gap:8px; padding:10px 16px; border-bottom:1px solid var(--border); flex-shrink:0; }
 .rt-btn { flex:1; padding:8px; border-radius:10px; border:1.5px solid var(--border); background:transparent; color:var(--text2); font-family:'Inter',sans-serif; font-weight:700; font-size:13px; cursor:pointer; transition:all 0.15s; }
 .rt-btn.active { border-color:var(--accent3); background:rgba(108,255,184,0.08); color:var(--accent3); }
+.rt-listen { flex:0 0 auto; padding-left:14px; padding-right:14px; border-color:rgba(124,108,255,0.4); color:var(--accent); }
+.rt-listen.playing { border-color:var(--accent); background:rgba(124,108,255,0.12); color:var(--accent); }
 .summary-meta { font-size:11px; color:var(--text3); font-weight:600; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border); }
 .reader-title { font-size:23px; font-weight:900; line-height:1.25; color:var(--text); margin-bottom:18px; letter-spacing:-0.3px; }
 .reader-content { font-size:16px; line-height:1.75; color:var(--text2); }
@@ -107,7 +109,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v4</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v5</span></div>
   <span class="count" id="count">0 links</span>
 </div>
 
@@ -139,6 +141,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
   <div class="reader-toggle">
     <button class="rt-btn active" id="rtFull" onclick="showFull()">📄 Full</button>
     <button class="rt-btn" id="rtSummary" onclick="showSummary()">✦ Summary</button>
+    <button class="rt-btn rt-listen" id="rtListen" onclick="toggleListen()">▶ Listen</button>
   </div>
   <div class="reader-body" id="readerBody"></div>
 </div>
@@ -257,11 +260,11 @@ function openLink(id) {
 
 // ---- IN-APP READER --------------------------------------------------------
 let currentReaderUrl = null;
-let readerState = { title:'', fullText:'', fullHtml:'', summaryHtml:'', summaryLoaded:false, view:'full' };
+let readerState = { title:'', fullText:'', fullHtml:'', summaryHtml:'', summaryMd:'', summaryLoaded:false, view:'full' };
 
 function openReader(l) {
   currentReaderUrl = l.url;
-  readerState = { title:'', fullText:'', fullHtml:'', summaryHtml:'', summaryLoaded:false, view:'full' };
+  readerState = { title:'', fullText:'', fullHtml:'', summaryHtml:'', summaryMd:'', summaryLoaded:false, view:'full' };
   document.getElementById('readerDomain').textContent = l.domain;
   document.getElementById('readerOrig').onclick = () => window.open(l.url, '_blank', 'noopener');
   setToggle('full');
@@ -272,7 +275,73 @@ function openReader(l) {
 }
 
 function closeReader() {
+  stopSpeech();
   document.getElementById('reader').classList.remove('open');
+}
+
+// ---- TEXT-TO-SPEECH (free, phone's built-in voice) ------------------------
+let speaking = false;
+let speechChunks = [];
+let speechIdx = 0;
+
+function plainTextForSpeech() {
+  // read whichever view is active; strip markdown so it isn't spoken literally
+  const src = readerState.view === 'summary' ? (readerState.summaryMd || '') : (readerState.fullText || '');
+  const title = readerState.title ? readerState.title + '. ' : '';
+  let t = src
+    .replace(/^#{1,6}\s+/gm, '')        // headings
+    .replace(/^[->*]\s+/gm, '')          // bullets / quotes
+    .replace(/\*\*([^*]+)\*\*/g, '$1')   // bold
+    .replace(/\*([^*]+)\*/g, '$1')       // italic
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links -> text
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')    // images
+    .replace(/`+/g, '')
+    .replace(/\n{2,}/g, '. ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return title + t;
+}
+
+function splitForSpeech(text) {
+  // break into sentence-ish chunks; some engines choke on very long strings
+  const parts = text.match(/[^.!?]+[.!?]+|\S[^.!?]*$/g) || [text];
+  const chunks = [];
+  let buf = '';
+  for (const p of parts) {
+    if ((buf + p).length > 220) { if (buf) chunks.push(buf.trim()); buf = p; }
+    else buf += p;
+  }
+  if (buf.trim()) chunks.push(buf.trim());
+  return chunks;
+}
+
+function toggleListen() {
+  if (!('speechSynthesis' in window)) { showToast('Voice not supported on this browser'); return; }
+  if (speaking) { stopSpeech(); return; }
+  const text = plainTextForSpeech();
+  if (!text || text.length < 4) { showToast('Nothing to read yet'); return; }
+  speechChunks = splitForSpeech(text);
+  speechIdx = 0;
+  speaking = true;
+  document.getElementById('rtListen').classList.add('playing');
+  document.getElementById('rtListen').innerHTML = '⏸ Stop';
+  speakNext();
+}
+
+function speakNext() {
+  if (!speaking || speechIdx >= speechChunks.length) { stopSpeech(); return; }
+  const u = new SpeechSynthesisUtterance(speechChunks[speechIdx]);
+  u.rate = 1.0; u.pitch = 1.0; u.lang = 'en-US';
+  u.onend = () => { if (speaking) { speechIdx++; speakNext(); } };
+  u.onerror = () => { if (speaking) { speechIdx++; speakNext(); } };
+  window.speechSynthesis.speak(u);
+}
+
+function stopSpeech() {
+  speaking = false;
+  try { window.speechSynthesis.cancel(); } catch(e) {}
+  const btn = document.getElementById('rtListen');
+  if (btn) { btn.classList.remove('playing'); btn.innerHTML = '▶ Listen'; }
 }
 
 function setToggle(view) {
@@ -304,6 +373,7 @@ async function fetchArticle(l) {
 }
 
 function showFull() {
+  stopSpeech();
   readerState.view = 'full';
   setToggle('full');
   const body = document.getElementById('readerBody');
@@ -312,6 +382,7 @@ function showFull() {
 }
 
 async function showSummary() {
+  stopSpeech();
   readerState.view = 'summary';
   setToggle('summary');
   const body = document.getElementById('readerBody');
@@ -337,6 +408,7 @@ async function showSummary() {
         '<button class="reader-error-btn" onclick="showFull()">Back to full article</button></div>';
       return;
     }
+    readerState.summaryMd = data.summary;
     readerState.summaryHtml =
       '<div class="reader-title">' + esc(readerState.title) + '</div>' +
       '<div class="summary-meta">✦ AI summary · always verify against the full article</div>' +
