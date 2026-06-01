@@ -96,6 +96,9 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .rt-listen { flex:0 0 auto; padding-left:14px; padding-right:14px; border-color:rgba(124,108,255,0.4); color:var(--accent); }
 .rt-listen.playing { border-color:var(--accent); background:rgba(124,108,255,0.12); color:var(--accent); }
 .rt-speed { flex:0 0 auto; padding-left:11px; padding-right:11px; min-width:46px; border-color:var(--border); color:var(--text2); }
+.reader-star { font-size:16px; font-weight:800; color:#ffe066; border:1px solid rgba(255,224,102,0.35); background:rgba(255,224,102,0.08); padding:5px 11px; border-radius:8px; cursor:pointer; flex-shrink:0; }
+.reader-star:active { background:rgba(255,224,102,0.2); }
+.reader-star.saved { background:#ffe066; color:#0d0d15; }
 .summary-meta { font-size:11px; color:var(--text3); font-weight:600; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border); }
 .reader-title { font-size:23px; font-weight:900; line-height:1.25; color:var(--text); margin-bottom:18px; letter-spacing:-0.3px; }
 .reader-content { font-size:16px; line-height:1.75; color:var(--text2); -webkit-user-select:text; user-select:text; }
@@ -147,7 +150,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v10</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v11</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <button class="hl-open-btn" onclick="openNotes()">★ Highlights</button>
     <span class="count" id="count">0 links</span>
@@ -179,6 +182,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
   <div class="reader-header">
     <div class="reader-back" onclick="closeReader()">‹ Back</div>
     <div class="reader-domain" id="readerDomain"></div>
+    <button class="reader-star" id="readerStar" onmousedown="grabSelection(event)" ontouchstart="grabSelection(event)" onclick="saveHighlight()" title="Save selected text as a highlight">★</button>
     <button class="reader-orig" id="readerOrig">Original ↗</button>
   </div>
   <div class="reader-toggle">
@@ -194,7 +198,6 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <span class="audio-pos" id="audioPos">0%</span>
   </div>
   <div class="reader-body" id="readerBody"></div>
-  <div class="hl-toolbar" id="hlToolbar"><button onmousedown="grabSelection(event)" ontouchstart="grabSelection(event)" onclick="saveHighlight()">★ Save highlight</button></div>
 </div>
 
 <!-- HIGHLIGHTS VIEW -->
@@ -553,33 +556,8 @@ function stopSpeech() {
 }
 
 // ---- HIGHLIGHTS -----------------------------------------------------------
-function checkSelection() {
-  const sel = window.getSelection();
-  const text = sel ? sel.toString().trim() : '';
-  const tb = document.getElementById('hlToolbar');
-  if (!tb) return;
-  const readerOpen = document.getElementById('reader').classList.contains('open');
-  // selection must be inside the reader body
-  let inBody = false;
-  if (sel && sel.rangeCount && readerOpen) {
-    let node = sel.anchorNode;
-    while (node) {
-      if (node.id === 'readerBody') { inBody = true; break; }
-      node = node.parentNode;
-    }
-  }
-  if (inBody && text.length > 3) tb.classList.add('show');
-  else tb.classList.remove('show');
-}
-// fire after the user finishes selecting (works on touch + mouse)
-document.addEventListener('touchend', () => setTimeout(checkSelection, 60), {passive:true});
-document.addEventListener('mouseup', () => setTimeout(checkSelection, 10));
-// selectionchange catches mobile long-press selection as it forms / grows
-let _selTimer = null;
-document.addEventListener('selectionchange', () => {
-  clearTimeout(_selTimer);
-  _selTimer = setTimeout(checkSelection, 150);
-});
+// Selection is captured the instant the ★ button is pressed (grabSelection),
+// which is reliable across mobile + desktop without fragile selection events.
 
 let pendingHighlight = '';
 function grabSelection(e) {
@@ -592,7 +570,8 @@ function grabSelection(e) {
 
 function saveHighlight() {
   const text = pendingHighlight || (window.getSelection() ? window.getSelection().toString().trim() : '');
-  if (!text || !currentReaderLink) { document.getElementById('hlToolbar').classList.remove('show'); return; }
+  if (!text) { showToast('Select some text first, then tap ★'); return; }
+  if (!currentReaderLink) return;
   highlights.unshift({
     id: Date.now(),
     text,
@@ -603,8 +582,9 @@ function saveHighlight() {
   });
   saveHighlights();
   pendingHighlight = '';
-  document.getElementById('hlToolbar').classList.remove('show');
   try { window.getSelection().removeAllRanges(); } catch(e){}
+  const star = document.getElementById('readerStar');
+  if (star) { star.classList.add('saved'); setTimeout(()=>star.classList.remove('saved'), 700); }
   showToast('★ Highlight saved');
 }
 
