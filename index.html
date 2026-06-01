@@ -114,13 +114,44 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .reader-error { padding:60px 30px; text-align:center; color:var(--text2); }
 .reader-error p { font-size:14px; line-height:1.7; margin-bottom:18px; }
 .reader-error-btn { display:inline-block; font-size:14px; font-weight:800; color:white; background:linear-gradient(135deg,var(--accent),var(--accent2)); padding:11px 22px; border-radius:11px; border:none; cursor:pointer; font-family:'Inter',sans-serif; }
+
+/* AUDIO SEEK BAR */
+.audio-bar { display:flex; align-items:center; gap:10px; padding:9px 16px; border-bottom:1px solid var(--border); flex-shrink:0; background:rgba(124,108,255,0.05); }
+.audio-skip { background:transparent; border:1px solid var(--border); color:var(--accent); border-radius:8px; width:34px; height:30px; font-size:13px; cursor:pointer; flex-shrink:0; }
+.audio-skip:active { background:var(--surface2); }
+.audio-seek { flex:1; height:5px; -webkit-appearance:none; appearance:none; background:var(--border); border-radius:3px; outline:none; }
+.audio-seek::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--accent); cursor:pointer; }
+.audio-seek::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:var(--accent); border:none; cursor:pointer; }
+.audio-pos { font-size:11px; color:var(--text3); font-weight:700; min-width:34px; text-align:right; flex-shrink:0; }
+
+/* HIGHLIGHT SELECTION TOOLBAR */
+.hl-toolbar { position:fixed; left:50%; transform:translateX(-50%) translateY(10px); bottom:calc(24px + var(--safe-bottom)); z-index:450; opacity:0; pointer-events:none; transition:all 0.18s; }
+.hl-toolbar.show { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
+.hl-toolbar button { background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; border:none; padding:11px 20px; border-radius:12px; font-family:'Inter',sans-serif; font-weight:800; font-size:14px; cursor:pointer; box-shadow:0 6px 24px rgba(124,108,255,0.45); }
+
+/* mark saved highlights inline */
+.reader-content .hl-mark { background:rgba(255,224,102,0.25); border-bottom:2px solid #ffe066; border-radius:2px; }
+
+/* HIGHLIGHTS BUTTON + VIEW */
+.hl-open-btn { font-size:11px; font-weight:800; color:var(--accent3); border:1px solid rgba(108,255,184,0.3); background:rgba(108,255,184,0.06); padding:6px 11px; border-radius:9px; cursor:pointer; font-family:'Inter',sans-serif; white-space:nowrap; }
+.note-group { margin-bottom:22px; }
+.note-group-title { font-size:13px; font-weight:800; color:var(--text); margin-bottom:4px; line-height:1.3; }
+.note-group-src { font-size:11px; color:var(--accent3); font-weight:600; margin-bottom:10px; cursor:pointer; }
+.note-card { background:var(--surface); border:1px solid var(--border); border-left:3px solid #ffe066; border-radius:10px; padding:12px 14px; margin-bottom:8px; position:relative; }
+.note-quote { font-size:14px; line-height:1.6; color:var(--text); }
+.note-meta { font-size:10px; color:var(--text3); font-weight:600; margin-top:8px; display:flex; justify-content:space-between; align-items:center; }
+.note-del { color:var(--text3); cursor:pointer; font-size:12px; padding:2px 6px; }
+.note-del:active { color:#ff3355; }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v7</span></div>
-  <span class="count" id="count">0 links</span>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v8</span></div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <button class="hl-open-btn" onclick="openNotes()">★ Highlights</button>
+    <span class="count" id="count">0 links</span>
+  </div>
 </div>
 
 <div class="add-wrap">
@@ -156,7 +187,24 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <button class="rt-btn rt-listen" id="rtListen" onclick="toggleListen()">▶ Listen</button>
     <button class="rt-btn rt-speed" id="rtSpeed" onclick="cycleSpeed()">1×</button>
   </div>
+  <div class="audio-bar" id="audioBar" style="display:none">
+    <button class="audio-skip" onclick="skipChunk(-1)">⏮</button>
+    <input type="range" class="audio-seek" id="audioSeek" min="0" max="100" value="0" oninput="seekTo(this.value)">
+    <button class="audio-skip" onclick="skipChunk(1)">⏭</button>
+    <span class="audio-pos" id="audioPos">0%</span>
+  </div>
   <div class="reader-body" id="readerBody"></div>
+  <div class="hl-toolbar" id="hlToolbar"><button onclick="saveHighlight()">★ Save highlight</button></div>
+</div>
+
+<!-- HIGHLIGHTS VIEW -->
+<div class="reader" id="notesPage">
+  <div class="reader-header">
+    <div class="reader-back" onclick="closeNotes()">‹ Back</div>
+    <div class="reader-domain">My Highlights</div>
+    <span class="count" id="notesCount">0</span>
+  </div>
+  <div class="reader-body" id="notesBody"></div>
 </div>
 
 <script>
@@ -332,10 +380,18 @@ function openLink(id) {
 
 // ---- IN-APP READER --------------------------------------------------------
 let currentReaderUrl = null;
+let currentReaderLink = null;
 let readerState = { title:'', fullText:'', fullHtml:'', summaryHtml:'', summaryMd:'', summaryLoaded:false, view:'full' };
+
+// highlights persisted separately from links
+const HL_KEY = 'sbr_highlights';
+let highlights = [];
+function loadHighlights(){ try { highlights = JSON.parse(localStorage.getItem(HL_KEY)||'[]'); } catch(e){ highlights=[]; } }
+function saveHighlights(){ try { localStorage.setItem(HL_KEY, JSON.stringify(highlights)); } catch(e){} }
 
 function openReader(l) {
   currentReaderUrl = l.url;
+  currentReaderLink = l;
   readerState = { title:'', fullText:'', fullHtml:'', summaryHtml:'', summaryMd:'', summaryLoaded:false, view:'full' };
   document.getElementById('readerDomain').textContent = l.domain;
   document.getElementById('readerOrig').onclick = () => window.open(l.url, '_blank', 'noopener');
@@ -413,11 +469,14 @@ function toggleListen() {
   speaking = true;
   document.getElementById('rtListen').classList.add('playing');
   document.getElementById('rtListen').innerHTML = '⏸ Stop';
+  document.getElementById('audioBar').style.display = 'flex';
+  updateSeek();
   speakNext();
 }
 
 function speakNext() {
   if (!speaking || speechIdx >= speechChunks.length) { stopSpeech(); return; }
+  updateSeek();
   const u = new SpeechSynthesisUtterance(speechChunks[speechIdx]);
   u.rate = speechRate; u.pitch = 1.0; u.lang = 'en-US';
   u.onend = () => { if (speaking) { speechIdx++; speakNext(); } };
@@ -425,11 +484,108 @@ function speakNext() {
   window.speechSynthesis.speak(u);
 }
 
+function updateSeek() {
+  const total = speechChunks.length || 1;
+  const pct = Math.round((speechIdx / total) * 100);
+  const seek = document.getElementById('audioSeek');
+  const pos = document.getElementById('audioPos');
+  if (seek) seek.value = pct;
+  if (pos) pos.textContent = pct + '%';
+}
+
+function skipChunk(dir) {
+  if (!speaking) return;
+  speechIdx = Math.max(0, Math.min(speechChunks.length - 1, speechIdx + dir));
+  try { window.speechSynthesis.cancel(); } catch(e) {}
+  speakNext();
+}
+
+function seekTo(val) {
+  if (!speaking || !speechChunks.length) return;
+  speechIdx = Math.floor((val / 100) * speechChunks.length);
+  if (speechIdx >= speechChunks.length) speechIdx = speechChunks.length - 1;
+  try { window.speechSynthesis.cancel(); } catch(e) {}
+  speakNext();
+}
+
 function stopSpeech() {
   speaking = false;
   try { window.speechSynthesis.cancel(); } catch(e) {}
   const btn = document.getElementById('rtListen');
   if (btn) { btn.classList.remove('playing'); btn.innerHTML = '▶ Listen'; }
+  const bar = document.getElementById('audioBar');
+  if (bar) bar.style.display = 'none';
+}
+
+// ---- HIGHLIGHTS -----------------------------------------------------------
+function handleSelection() {
+  const sel = window.getSelection();
+  const text = sel ? sel.toString().trim() : '';
+  const tb = document.getElementById('hlToolbar');
+  // only inside the reader content and only when there's a real selection
+  const inReader = document.getElementById('reader').classList.contains('open');
+  if (inReader && text.length > 3) tb.classList.add('show');
+  else tb.classList.remove('show');
+}
+document.addEventListener('selectionchange', handleSelection);
+
+function saveHighlight() {
+  const sel = window.getSelection();
+  const text = sel ? sel.toString().trim() : '';
+  if (!text || !currentReaderLink) { document.getElementById('hlToolbar').classList.remove('show'); return; }
+  highlights.unshift({
+    id: Date.now(),
+    text,
+    url: currentReaderLink.url,
+    title: readerState.title || currentReaderLink.title || currentReaderLink.domain,
+    domain: currentReaderLink.domain,
+    addedAt: Date.now(),
+  });
+  saveHighlights();
+  document.getElementById('hlToolbar').classList.remove('show');
+  try { sel.removeAllRanges(); } catch(e){}
+  showToast('★ Highlight saved');
+}
+
+function openNotes() {
+  renderNotes();
+  document.getElementById('notesPage').classList.add('open');
+}
+function closeNotes() {
+  document.getElementById('notesPage').classList.remove('open');
+}
+
+function renderNotes() {
+  const body = document.getElementById('notesBody');
+  document.getElementById('notesCount').textContent = highlights.length;
+  if (!highlights.length) {
+    body.innerHTML = '<div class="reader-error"><p>No highlights yet.<br>While reading an article, select any text and tap ★ Save highlight.</p></div>';
+    return;
+  }
+  // group by article
+  const groups = {};
+  highlights.forEach(h => { (groups[h.url] = groups[h.url] || []).push(h); });
+  let html = '';
+  Object.keys(groups).forEach(url => {
+    const g = groups[url];
+    html += `<div class="note-group">
+      <div class="note-group-title">${esc(g[0].title || g[0].domain)}</div>
+      <div class="note-group-src" onclick="window.open('${esc(url)}','_blank','noopener')">${esc(g[0].domain)} ↗</div>`;
+    g.forEach(h => {
+      html += `<div class="note-card">
+        <div class="note-quote">${esc(h.text)}</div>
+        <div class="note-meta"><span>${new Date(h.addedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span><span class="note-del" onclick="deleteHighlight(${h.id})">🗑 remove</span></div>
+      </div>`;
+    });
+    html += `</div>`;
+  });
+  body.innerHTML = html;
+}
+
+function deleteHighlight(id) {
+  highlights = highlights.filter(h => h.id !== id);
+  saveHighlights();
+  renderNotes();
 }
 
 function setToggle(view) {
@@ -669,6 +825,7 @@ function showUndoToast(removed, idx) {
 }
 
 load();
+loadHighlights();
 render();
 buildCatFilters();
 setupSwipe();
