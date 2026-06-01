@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="theme-color" content="#0d0d15">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -100,6 +103,32 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .reader-star:active { background:rgba(255,224,102,0.2); }
 .reader-star.saved { background:#ffe066; color:#0d0d15; }
 .summary-meta { font-size:11px; color:var(--text3); font-weight:600; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+
+/* HAMBURGER + MENU */
+.hamburger-btn { width:36px; height:34px; border-radius:9px; border:1px solid var(--border); background:var(--surface); color:var(--text2); font-size:17px; cursor:pointer; }
+.hamburger-btn:active { background:var(--surface2); }
+.menu-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; opacity:0; pointer-events:none; transition:opacity 0.2s; }
+.menu-overlay.open { opacity:1; pointer-events:auto; }
+.menu-panel { position:absolute; top:0; right:0; bottom:0; width:270px; max-width:80vw; background:var(--surface); border-left:1px solid var(--border); transform:translateX(100%); transition:transform 0.25s cubic-bezier(0.4,0,0.2,1); padding-top:var(--safe-top); display:flex; flex-direction:column; }
+.menu-overlay.open .menu-panel { transform:translateX(0); }
+.menu-header { display:flex; align-items:center; justify-content:space-between; padding:16px 18px; border-bottom:1px solid var(--border); }
+.menu-title { font-size:17px; font-weight:900; color:var(--text); }
+.menu-close { color:var(--text3); font-size:18px; cursor:pointer; padding:4px; }
+.menu-item { display:flex; align-items:center; gap:13px; padding:15px 18px; border-bottom:1px solid var(--border); cursor:pointer; }
+.menu-item:active { background:var(--surface2); }
+.menu-ico { width:34px; height:34px; border-radius:9px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; color:var(--accent3); }
+.menu-item-t { font-size:14px; font-weight:700; color:var(--text); }
+.menu-item-s { font-size:11px; color:var(--text3); margin-top:1px; }
+
+/* CONFIRM DIALOG */
+.confirm-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(4px); z-index:600; display:flex; align-items:center; justify-content:center; padding:24px; opacity:0; pointer-events:none; transition:opacity 0.18s; }
+.confirm-overlay.open { opacity:1; pointer-events:auto; }
+.confirm-box { background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:22px; max-width:340px; width:100%; transform:scale(0.94); transition:transform 0.18s; }
+.confirm-overlay.open .confirm-box { transform:scale(1); }
+.confirm-msg { font-size:15px; font-weight:600; color:var(--text); line-height:1.5; margin-bottom:20px; text-align:center; }
+.confirm-btns { display:flex; gap:10px; }
+.confirm-cancel { flex:1; padding:12px; border-radius:11px; border:1.5px solid var(--border); background:transparent; color:var(--text2); font-family:'Inter',sans-serif; font-weight:700; font-size:14px; cursor:pointer; }
+.confirm-ok { flex:1; padding:12px; border-radius:11px; border:none; background:#ff3355; color:#fff; font-family:'Inter',sans-serif; font-weight:800; font-size:14px; cursor:pointer; }
 .reader-title { font-size:23px; font-weight:900; line-height:1.25; color:var(--text); margin-bottom:18px; letter-spacing:-0.3px; }
 .reader-content { font-size:16px; line-height:1.75; color:var(--text2); -webkit-user-select:text; user-select:text; }
 .reader-content p { margin-bottom:16px; }
@@ -150,10 +179,29 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v12</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v13</span></div>
   <div style="display:flex;align-items:center;gap:8px">
-    <button class="hl-open-btn" onclick="openNotes()">★ Highlights</button>
     <span class="count" id="count">0 links</span>
+    <button class="hamburger-btn" onclick="openMenu()">☰</button>
+  </div>
+</div>
+
+<!-- HAMBURGER MENU -->
+<div class="menu-overlay" id="menuOverlay" onclick="if(event.target===this)closeMenu()">
+  <div class="menu-panel">
+    <div class="menu-header">
+      <span class="menu-title">Menu</span>
+      <span class="menu-close" onclick="closeMenu()">✕</span>
+    </div>
+    <div class="menu-item" onclick="closeMenu();openNotes()">
+      <span class="menu-ico">★</span><div><div class="menu-item-t">Highlights</div><div class="menu-item-s" id="menuHlCount">0 saved</div></div>
+    </div>
+    <div class="menu-item" onclick="exportBackup()">
+      <span class="menu-ico">⬇</span><div><div class="menu-item-t">Export backup</div><div class="menu-item-s">Save your links to a file</div></div>
+    </div>
+    <div class="menu-item" onclick="importBackup()">
+      <span class="menu-ico">⬆</span><div><div class="menu-item-t">Import backup</div><div class="menu-item-s">Restore links from a file</div></div>
+    </div>
   </div>
 </div>
 
@@ -176,6 +224,17 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <div class="list-wrap" id="list"></div>
 
 <div class="toast" id="toast"></div>
+
+<!-- CONFIRM DIALOG -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <div class="confirm-msg" id="confirmMsg">Are you sure?</div>
+    <div class="confirm-btns">
+      <button class="confirm-cancel" onclick="closeConfirm()">Cancel</button>
+      <button class="confirm-ok" id="confirmOk">Delete</button>
+    </div>
+  </div>
+</div>
 
 <!-- READER -->
 <div class="reader" id="reader">
@@ -236,6 +295,78 @@ function load() {
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(links)); }
   catch(e) { /* storage blocked (e.g. preview sandbox) — links still live in memory this session */ }
+  try { autoBackup(); } catch(e) {}
+}
+
+// ---- MENU -----------------------------------------------------------------
+function openMenu() {
+  const m = document.getElementById('menuOverlay');
+  document.getElementById('menuHlCount').textContent = highlights.length + ' saved';
+  m.classList.add('open');
+}
+function closeMenu() { document.getElementById('menuOverlay').classList.remove('open'); }
+
+// ---- CONFIRM DIALOG -------------------------------------------------------
+let _confirmAction = null;
+function askConfirm(message, onYes, okLabel) {
+  document.getElementById('confirmMsg').textContent = message;
+  const ok = document.getElementById('confirmOk');
+  ok.textContent = okLabel || 'Delete';
+  _confirmAction = onYes;
+  ok.onclick = () => { closeConfirm(); if (_confirmAction) _confirmAction(); };
+  document.getElementById('confirmOverlay').classList.add('open');
+}
+function closeConfirm() {
+  document.getElementById('confirmOverlay').classList.remove('open');
+  _confirmAction = null;
+}
+
+// ---- BACKUP / RESTORE -----------------------------------------------------
+function autoBackup() {
+  const today = new Date().toISOString().split('T')[0];
+  if (localStorage.getItem('sbr_lastbackup') === today) return;
+  try {
+    const hl = (typeof highlights !== 'undefined' && highlights) ? highlights : [];
+    localStorage.setItem('sbr_autobackup', JSON.stringify({ links, highlights: hl, at: Date.now() }));
+    localStorage.setItem('sbr_lastbackup', today);
+  } catch(e) {}
+}
+
+function exportBackup() {
+  closeMenu();
+  const data = { app:'sbs-reads', version:1, exportedAt:new Date().toISOString(), links, highlights };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'sbs-reads-backup-' + new Date().toISOString().split('T')[0] + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Backup downloaded ✓');
+}
+
+function importBackup() {
+  closeMenu();
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json,application/json';
+  input.onchange = e => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.links || !Array.isArray(data.links)) { showToast('Not a valid backup file'); return; }
+        askConfirm('Restore ' + data.links.length + ' links from this backup? This replaces your current list.', () => {
+          links = data.links;
+          if (Array.isArray(data.highlights)) { highlights = data.highlights; saveHighlights(); }
+          save(); buildCatFilters(); render();
+          showToast('Restored ' + links.length + ' links ✓');
+        }, 'Restore');
+      } catch(err) { showToast('Could not read that file'); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -320,11 +451,16 @@ async function pasteFromClipboard() {
 function deleteLink(id) {
   const idx = links.findIndex(l => l.id === id);
   if (idx === -1) return;
-  const removed = links[idx];
-  links.splice(idx, 1);
-  save();
-  render();
-  showUndoToast(removed, idx);
+  const l = links[idx];
+  const label = l.title || l.domain;
+  askConfirm('Delete "' + (label.length > 50 ? label.slice(0,50)+'…' : label) + '"?', () => {
+    const i = links.findIndex(x => x.id === id);
+    if (i === -1) return;
+    const removed = links[i];
+    links.splice(i, 1);
+    save(); render();
+    showUndoToast(removed, i);
+  });
 }
 
 function buildCatFilters() {
@@ -425,12 +561,16 @@ function cycleSpeed() {
   localStorage.setItem('sbr_rate', String(speechRate));
   const btn = document.getElementById('rtSpeed');
   if (btn) btn.textContent = (speechRate === 1 ? '1' : speechRate) + '×';
-  // if currently playing, restart current chunk at new speed for immediate effect
-  if (speaking) {
+  // The Web Speech API can't change rate mid-sentence, so re-speak the current
+  // chunk at the new speed. Skip the seek-bar refresh so the bar doesn't twitch.
+  if (speaking && !paused) {
+    _suppressSeekUpdate = true;
     try { window.speechSynthesis.cancel(); } catch(e) {}
     speakNext();
+    _suppressSeekUpdate = false;
   }
 }
+let _suppressSeekUpdate = false;
 
 function plainTextForSpeech() {
   // read whichever view is active; strip markdown so it isn't spoken literally
@@ -504,7 +644,7 @@ function setListenBtn(playing) {
 function speakNext() {
   if (!speaking || paused) return;
   if (speechIdx >= speechChunks.length) { endPlayback(); return; }
-  updateSeek();
+  if (!_suppressSeekUpdate) updateSeek();
   const u = new SpeechSynthesisUtterance(speechChunks[speechIdx]);
   u.rate = speechRate; u.pitch = 1.0; u.lang = 'en-US';
   u.onend = () => { if (speaking && !paused) { speechIdx++; speakNext(); } };
@@ -655,9 +795,11 @@ function renderNotes() {
 }
 
 function deleteHighlight(id) {
-  highlights = highlights.filter(h => h.id !== id);
-  saveHighlights();
-  renderNotes();
+  askConfirm('Remove this highlight?', () => {
+    highlights = highlights.filter(h => h.id !== id);
+    saveHighlights();
+    renderNotes();
+  }, 'Remove');
 }
 
 function setToggle(view) {
@@ -723,9 +865,11 @@ async function showSummary() {
     const data = await resp.json();
     if (currentReaderUrl !== urlAtRequest || readerState.view !== 'summary') return;
     if (!data.ok || !data.summary) {
-      body.innerHTML = '<div class="reader-error"><p>Couldn\'t generate a summary' +
-        (data.error ? ' (' + esc(data.error) + ')' : '') + '.</p>' +
-        '<button class="reader-error-btn" onclick="showFull()">Back to full article</button></div>';
+      const busy = data.retryable || (data.error && /503|429|busy/i.test(data.error));
+      body.innerHTML = '<div class="reader-error"><p>' +
+        (busy ? 'Gemini is busy right now. Give it a moment and try again.' : "Couldn't generate a summary" + (data.error ? ' (' + esc(data.error) + ')' : '') + '.') +
+        '</p><button class="reader-error-btn" onclick="retrySummary()">↻ Try again</button> ' +
+        '<button class="reader-error-btn" style="background:var(--surface2);color:var(--text2);margin-left:8px" onclick="showFull()">Full article</button></div>';
       return;
     }
     readerState.summaryMd = data.summary;
@@ -742,6 +886,11 @@ async function showSummary() {
         '<button class="reader-error-btn" onclick="showSummary()">Try again</button></div>';
     }
   }
+}
+
+function retrySummary() {
+  readerState.summaryLoaded = false;
+  showSummary();
 }
 
 function showReaderError(l) {
