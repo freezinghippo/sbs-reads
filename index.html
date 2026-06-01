@@ -56,6 +56,18 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .cat-tag { font-size:9px; font-weight:800; padding:1px 7px; border-radius:4px; letter-spacing:0.3px; line-height:1.7; flex-shrink:0; }
 .cat-tag.pending { background:var(--surface2); color:var(--text3); border:1px solid var(--border); }
 
+/* READ FILTERS */
+.read-filters { display:flex; gap:7px; padding:0 18px 8px; flex-shrink:0; }
+.read-fbtn { padding:5px 14px; border-radius:20px; font-size:11px; border:1.5px solid var(--border); background:var(--surface); color:var(--text2); cursor:pointer; font-weight:700; transition:all 0.15s; }
+.read-fbtn.active { background:var(--accent3); border-color:var(--accent3); color:#0d0d15; }
+
+/* READ TIME + READ STATE */
+.read-time { font-size:10px; color:var(--text3); font-weight:700; }
+.read-time::before { content:'· '; }
+.unread-dot { position:absolute; left:7px; top:50%; transform:translateY(-50%); width:7px; height:7px; border-radius:50%; background:var(--accent3); flex-shrink:0; }
+.link-item.is-read { opacity:0.55; }
+.link-item.is-read .link-title { font-weight:500; }
+
 .list-wrap { flex:1; overflow-y:auto; overflow-x:hidden; padding-bottom:30px; scrollbar-width:none; min-height:0; }
 .list-wrap::-webkit-scrollbar { display:none; }
 
@@ -179,7 +191,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v13</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v14</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <span class="count" id="count">0 links</span>
     <button class="hamburger-btn" onclick="openMenu()">☰</button>
@@ -219,6 +231,12 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
   <input class="search-input" id="searchInput" placeholder="search saved links..." oninput="render()">
 </div>
 
+<div class="read-filters">
+  <button class="read-fbtn active" id="rf-all" onclick="setReadFilter(null)">All</button>
+  <button class="read-fbtn" id="rf-unread" onclick="setReadFilter('unread')">Unread</button>
+  <button class="read-fbtn" id="rf-read" onclick="setReadFilter('read')">Read</button>
+</div>
+
 <div class="cat-filters" id="catFilters"></div>
 
 <div class="list-wrap" id="list"></div>
@@ -243,6 +261,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <div class="reader-domain" id="readerDomain"></div>
     <button class="reader-star" id="readerStar" title="Save selected text as a highlight">★</button>
     <button class="reader-orig" id="readerOrig">Original ↗</button>
+    <button class="hamburger-btn" onclick="openMenu()" style="margin-left:4px">☰</button>
   </div>
   <div class="reader-toggle">
     <button class="rt-btn active" id="rtFull" onclick="showFull()">📄 Full</button>
@@ -286,6 +305,7 @@ const CATS = [
 ];
 function catColor(name){ return (CATS.find(c=>c.name===name)||{}).color || '#a8a8c0'; }
 let activeCat = null;
+let readFilter = null; // null | 'unread' | 'read'
 let links = [];
 
 function load() {
@@ -483,29 +503,43 @@ function setCat(name) {
   render();
 }
 
+function setReadFilter(mode) {
+  readFilter = mode;
+  ['all','unread','read'].forEach(m => {
+    const b = document.getElementById('rf-' + m);
+    if (b) b.classList.toggle('active', (mode||'all') === m);
+  });
+  render();
+}
+
 function render() {
   const list = document.getElementById('list');
   const q = document.getElementById('searchInput').value.toLowerCase().trim();
   let filtered = links.filter(l => {
     if (activeCat && l.cat !== activeCat) return false;
+    if (readFilter === 'unread' && l.read) return false;
+    if (readFilter === 'read' && !l.read) return false;
     if (q && !(l.url.toLowerCase().includes(q) || l.domain.toLowerCase().includes(q) || (l.title||'').toLowerCase().includes(q))) return false;
     return true;
   });
-  document.getElementById('count').textContent = links.length + ' link' + (links.length!==1?'s':'');
+  const unreadCount = links.filter(l => !l.read).length;
+  document.getElementById('count').textContent = unreadCount + ' unread · ' + links.length + ' total';
   if (!filtered.length) {
-    list.innerHTML = `<div class="empty"><div class="icon">${q||activeCat?'⌕':'🔖'}</div><p>${q||activeCat?'No links match.':'No saved links yet.<br>Paste a link above, or share one into the app.'}</p></div>`;
+    list.innerHTML = `<div class="empty"><div class="icon">${q||activeCat||readFilter?'⌕':'🔖'}</div><p>${q||activeCat||readFilter?'No links match.':'No saved links yet.<br>Paste a link above, or share one into the app.'}</p></div>`;
     return;
   }
   list.innerHTML = filtered.map(l => {
     const tag = l.cat
       ? `<span class="cat-tag" style="background:${catColor(l.cat)};color:#0d0d15">${esc(l.cat)}</span>`
       : `<span class="cat-tag pending">…</span>`;
+    const readTime = l.words ? `<span class="read-time">${Math.max(1, Math.round(l.words/225))} min</span>` : '';
     return `
-    <div class="link-item" data-id="${l.id}" onclick="openLink(${l.id})">
+    <div class="link-item ${l.read?'is-read':''}" data-id="${l.id}" onclick="openLink(${l.id})">
+      ${l.read ? '' : '<span class="unread-dot"></span>'}
       <div class="fav"><img src="${esc(faviconOf(l.url))}" onerror="this.style.display='none';this.parentNode.innerHTML='<span class=&quot;fav-fallback&quot;>🔗</span>'"></div>
       <div class="link-body">
         <div class="link-title">${esc(l.title || l.domain)}</div>
-        <div class="task-meta" style="display:flex;gap:7px;align-items:center;margin-top:4px">${tag}<span class="link-url" style="margin-top:0">${esc(l.domain)}</span></div>
+        <div class="task-meta" style="display:flex;gap:7px;align-items:center;margin-top:4px">${tag}<span class="link-url" style="margin-top:0">${esc(l.domain)}</span>${readTime}</div>
       </div>
       <span class="link-time">${timeAgo(l.addedAt)}</span>
     </div>`;
@@ -532,6 +566,8 @@ function openReader(l) {
   currentReaderUrl = l.url;
   currentReaderLink = l;
   pendingHighlight = '';
+  // mark as read on open
+  if (!l.read) { l.read = true; save(); }
   readerState = { title:'', fullText:'', fullHtml:'', summaryHtml:'', summaryMd:'', summaryLoaded:false, view:'full' };
   document.getElementById('readerDomain').textContent = l.domain;
   document.getElementById('readerOrig').onclick = () => window.open(l.url, '_blank', 'noopener');
@@ -647,10 +683,13 @@ function speakNext() {
   if (!_suppressSeekUpdate) updateSeek();
   const u = new SpeechSynthesisUtterance(speechChunks[speechIdx]);
   u.rate = speechRate; u.pitch = 1.0; u.lang = 'en-US';
-  u.onend = () => { if (speaking && !paused) { speechIdx++; speakNext(); } };
-  u.onerror = () => { if (speaking && !paused) { speechIdx++; speakNext(); } };
+  // token so a canceled/replaced utterance can't advance the index
+  const myToken = ++speechToken;
+  u.onend = () => { if (speaking && !paused && myToken === speechToken) { speechIdx++; speakNext(); } };
+  u.onerror = () => { if (speaking && !paused && myToken === speechToken) { speechIdx++; speakNext(); } };
   window.speechSynthesis.speak(u);
 }
+let speechToken = 0;
 
 function updateSeek() {
   const total = speechChunks.length || 1;
@@ -818,6 +857,9 @@ async function fetchArticle(l) {
     }
     readerState.title = decodeEntities(data.title || l.domain);
     readerState.fullText = data.text;
+    // store read-time estimate (words / 225 wpm) for the list
+    const words = (data.text.match(/\S+/g) || []).length;
+    if (words && l.words !== words) { l.words = words; save(); render(); }
     // self-correct / fill category now that we have real article text
     if (!l.cat || l.cat === 'Other') {
       categorizeLink(l, data.text);
@@ -1008,7 +1050,11 @@ function setupSwipe() {
     const dx = e.changedTouches[0].clientX - startX;
     if (moved && Math.abs(dx) > T) {
       const id = parseInt(row.dataset.id);
-      if (bg) { bg.remove(); bg = null; }
+      const thisRow = row;
+      // snap the row back first — the confirm dialog decides the real outcome
+      thisRow.style.transition = 'transform 0.25s cubic-bezier(0.4,0,0.2,1)';
+      thisRow.style.transform = 'translateX(0)';
+      if (bg) { const b=bg; b.style.transition='opacity 0.2s'; b.style.opacity='0'; setTimeout(()=>b.remove(),220); bg=null; }
       deleteLink(id);
     } else {
       row.style.transition = 'transform 0.25s cubic-bezier(0.4,0,0.2,1)';
