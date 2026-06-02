@@ -196,7 +196,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v19</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v21</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <span class="count" id="count">0 links</span>
     <button class="hamburger-btn" id="refreshBtn" onclick="manualRefresh()" title="Refresh / sync now">⟳</button>
@@ -730,9 +730,14 @@ async function categorizeLink(link, text) {
       body: JSON.stringify({ url: link.url, title: link.title || '', text: text || '' }),
     });
     const data = await resp.json();
-    if (data.ok && data.category) {
+    if (data.ok) {
       const l = links.find(x => x.id === link.id);
-      if (l) { l.cat = data.category; save(); buildCatFilters(); render(); }
+      if (l) {
+        if (data.category) l.cat = data.category;
+        // fill in the real title if we don't have one yet (e.g. links saved via share)
+        if (data.title && (!l.title || l.title === l.domain)) l.title = decodeEntities(data.title);
+        save(); buildCatFilters(); render();
+      }
     }
   } catch(e) { /* leave untagged; will retry when read */ }
 }
