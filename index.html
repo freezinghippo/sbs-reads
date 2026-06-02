@@ -21,6 +21,11 @@
   --text:#f0f0ff; --text2:#b0b0cc; --text3:#7a7a99;
   --safe-top:env(safe-area-inset-top,0px); --safe-bottom:env(safe-area-inset-bottom,0px);
 }
+body.light {
+  --bg:#f7f7fb; --surface:#ffffff; --surface2:#eeeef4; --border:#d8d8e4;
+  --accent:#6a5cff; --accent2:#e84d86; --accent3:#1fae73;
+  --text:#15151f; --text2:#44445a; --text3:#8a8a9c;
+}
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); height:100dvh; display:flex; flex-direction:column; overflow:hidden; padding-top:var(--safe-top); }
 
@@ -191,9 +196,10 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v18</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v19</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <span class="count" id="count">0 links</span>
+    <button class="hamburger-btn" id="refreshBtn" onclick="manualRefresh()" title="Refresh / sync now">⟳</button>
     <button class="hamburger-btn" onclick="openMenu()">☰</button>
   </div>
 </div>
@@ -204,6 +210,15 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <div class="menu-header">
       <span class="menu-title">Menu</span>
       <span class="menu-close" onclick="closeMenu()">✕</span>
+    </div>
+    <div class="menu-item" onclick="toggleTheme()">
+      <span class="menu-ico" id="themeIco">☀️</span><div><div class="menu-item-t" id="themeLabel">Light mode</div><div class="menu-item-s">Switch appearance</div></div>
+    </div>
+    <div class="menu-item" onclick="cycleSort()">
+      <span class="menu-ico">↕</span><div><div class="menu-item-t">Sort</div><div class="menu-item-s" id="sortLabel">Newest first</div></div>
+    </div>
+    <div class="menu-item" onclick="closeMenu();openArchive()">
+      <span class="menu-ico">🗄</span><div><div class="menu-item-t">Archive</div><div class="menu-item-s" id="menuArchiveCount">0 archived</div></div>
     </div>
     <div class="menu-item" onclick="closeMenu();openSync()">
       <span class="menu-ico">☁</span><div><div class="menu-item-t">Cloud Sync</div><div class="menu-item-s" id="menuSyncStatus">Not set up</div></div>
@@ -306,6 +321,16 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <span class="count" id="notesCount">0</span>
   </div>
   <div class="reader-body" id="notesBody"></div>
+</div>
+
+<!-- ARCHIVE VIEW -->
+<div class="reader" id="archivePage">
+  <div class="reader-header">
+    <div class="reader-back" onclick="closeArchive()">‹ Back</div>
+    <div class="reader-domain">Archive</div>
+    <span class="count" id="archiveCount">0</span>
+  </div>
+  <div class="list-wrap" id="archiveList" style="padding-bottom:30px"></div>
 </div>
 
 <script>
@@ -426,6 +451,19 @@ function mergeHighlights(a, b) {
   return [...map.values()].sort((x,y) => (y.addedAt||0) - (x.addedAt||0));
 }
 
+async function manualRefresh() {
+  const btn = document.getElementById('refreshBtn');
+  if (btn) { btn.style.transition = 'transform 0.6s ease'; btn.style.transform = 'rotate(360deg)'; }
+  if (syncCode) {
+    await syncNow(false);
+    showToast('☁ Refreshed');
+  } else {
+    render();
+    showToast('Set up Cloud Sync (☰) to pull from other devices');
+  }
+  if (btn) setTimeout(() => { btn.style.transition='none'; btn.style.transform='rotate(0deg)'; }, 650);
+}
+
 async function syncNow(mergeFirst) {
   if (!syncCode || syncing) return;
   syncing = true;
@@ -465,9 +503,120 @@ async function syncNow(mergeFirst) {
 function openMenu() {
   const m = document.getElementById('menuOverlay');
   document.getElementById('menuHlCount').textContent = highlights.length + ' saved';
+  const ac = document.getElementById('menuArchiveCount');
+  if (ac) ac.textContent = links.filter(l=>l.archived).length + ' archived';
+  const sl = document.getElementById('sortLabel');
+  if (sl) { const s = SORTS.find(x=>x.key===sortMode); sl.textContent = s ? s.label : 'Newest first'; }
   m.classList.add('open');
 }
 function closeMenu() { document.getElementById('menuOverlay').classList.remove('open'); }
+
+// ---- THEME ----------------------------------------------------------------
+function applyTheme() {
+  const light = localStorage.getItem('sbr_theme') === 'light';
+  document.body.classList.toggle('light', light);
+  const ico = document.getElementById('themeIco');
+  const lbl = document.getElementById('themeLabel');
+  if (ico) ico.textContent = light ? '🌙' : '☀️';
+  if (lbl) lbl.textContent = light ? 'Dark mode' : 'Light mode';
+  const tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.setAttribute('content', light ? '#f7f7fb' : '#0d0d15');
+}
+function toggleTheme() {
+  const light = localStorage.getItem('sbr_theme') === 'light';
+  localStorage.setItem('sbr_theme', light ? 'dark' : 'light');
+  applyTheme();
+}
+
+// ---- SORT -----------------------------------------------------------------
+const SORTS = [
+  { key:'newest', label:'Newest first' },
+  { key:'oldest', label:'Oldest first' },
+  { key:'unread', label:'Unread first' },
+  { key:'title',  label:'Title A–Z' },
+  { key:'cat',    label:'By category' },
+];
+let sortMode = localStorage.getItem('sbr_sort') || 'newest';
+function cycleSort() {
+  let i = SORTS.findIndex(s => s.key === sortMode);
+  i = (i + 1) % SORTS.length;
+  sortMode = SORTS[i].key;
+  localStorage.setItem('sbr_sort', sortMode);
+  const lbl = document.getElementById('sortLabel');
+  if (lbl) lbl.textContent = SORTS[i].label;
+  render();
+  showToast('Sort: ' + SORTS[i].label);
+}
+function sortLinks(arr) {
+  const a = [...arr];
+  if (sortMode === 'newest') a.sort((x,y)=>(y.addedAt||0)-(x.addedAt||0));
+  else if (sortMode === 'oldest') a.sort((x,y)=>(x.addedAt||0)-(y.addedAt||0));
+  else if (sortMode === 'unread') a.sort((x,y)=>(x.read?1:0)-(y.read?1:0) || (y.addedAt||0)-(x.addedAt||0));
+  else if (sortMode === 'title') a.sort((x,y)=>(x.title||x.domain||'').localeCompare(y.title||y.domain||''));
+  else if (sortMode === 'cat') a.sort((x,y)=>(x.cat||'zz').localeCompare(y.cat||'zz') || (y.addedAt||0)-(x.addedAt||0));
+  return a;
+}
+
+// ---- ARCHIVE --------------------------------------------------------------
+function openArchive() {
+  renderArchive();
+  document.getElementById('archivePage').classList.add('open');
+}
+function closeArchive() { document.getElementById('archivePage').classList.remove('open'); }
+
+function archiveLink(id) {
+  const l = links.find(x => x.id === id);
+  if (l) { l.archived = true; save(); render(); buildCatFilters(); showToast('Archived'); }
+}
+function archiveLinkWithUndo(id) {
+  const l = links.find(x => x.id === id);
+  if (!l) return;
+  l.archived = true; save(); render(); buildCatFilters();
+  const t = document.getElementById('toast');
+  t.innerHTML = '<span>🗄 Archived</span>';
+  const btn = document.createElement('button');
+  btn.className = 'toast-undo'; btn.textContent = '↩ Undo';
+  btn.onclick = () => { const ll = links.find(x=>x.id===id); if(ll){ll.archived=false; save(); render(); buildCatFilters();} t.classList.remove('show'); clearTimeout(t._timer); };
+  t.appendChild(btn);
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>t.classList.remove('show'), 5000);
+}
+function unarchiveLink(id) {
+  const l = links.find(x => x.id === id);
+  if (l) { l.archived = false; save(); renderArchive(); render(); buildCatFilters(); showToast('Restored'); }
+}
+function deleteFromArchive(id) {
+  const l = links.find(x => x.id === id);
+  const label = l ? (l.title || l.domain) : 'this link';
+  askConfirm('Permanently delete "' + (label.length>50?label.slice(0,50)+'…':label) + '"? This cannot be undone.', () => {
+    links = links.filter(x => x.id !== id);
+    save(); renderArchive(); render(); buildCatFilters();
+    showToast('Deleted');
+  });
+}
+
+function renderArchive() {
+  const list = document.getElementById('archiveList');
+  const arch = links.filter(l => l.archived);
+  document.getElementById('archiveCount').textContent = arch.length;
+  if (!arch.length) {
+    list.innerHTML = '<div class="empty"><div class="icon">🗄</div><p>Nothing archived yet.<br>Swipe a link left and choose Archive to keep it without deleting.</p></div>';
+    return;
+  }
+  list.innerHTML = sortLinks(arch).map(l => `
+    <div class="link-item" data-id="${l.id}" onclick="openLink(${l.id})">
+      <div class="fav"><img src="${esc(faviconOf(l.url))}" onerror="this.style.display='none';this.parentNode.innerHTML='<span class=&quot;fav-fallback&quot;>🔗</span>'"></div>
+      <div class="link-body">
+        <div class="link-title">${esc(l.title || l.domain)}</div>
+        <div class="task-meta" style="display:flex;gap:7px;align-items:center;margin-top:4px"><span class="link-url" style="margin-top:0">${esc(l.domain)}</span></div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="row-open" style="border-color:rgba(108,255,184,0.3);color:var(--accent3)" onclick="event.stopPropagation();unarchiveLink(${l.id})">Restore</button>
+        <button class="row-open" style="border-color:rgba(255,51,85,0.3);color:#ff3355" onclick="event.stopPropagation();deleteFromArchive(${l.id})">🗑</button>
+      </div>
+    </div>`).join('');
+}
 
 // ---- CONFIRM DIALOG -------------------------------------------------------
 let _confirmAction = null;
@@ -659,14 +808,17 @@ function render() {
   const list = document.getElementById('list');
   const q = document.getElementById('searchInput').value.toLowerCase().trim();
   let filtered = links.filter(l => {
+    if (l.archived) return false;
     if (activeCat && l.cat !== activeCat) return false;
     if (readFilter === 'unread' && l.read) return false;
     if (readFilter === 'read' && !l.read) return false;
     if (q && !(l.url.toLowerCase().includes(q) || l.domain.toLowerCase().includes(q) || (l.title||'').toLowerCase().includes(q))) return false;
     return true;
   });
-  const unreadCount = links.filter(l => !l.read).length;
-  document.getElementById('count').textContent = unreadCount + ' unread · ' + links.length + ' total';
+  filtered = sortLinks(filtered);
+  const active = links.filter(l => !l.archived);
+  const unreadCount = active.filter(l => !l.read).length;
+  document.getElementById('count').textContent = unreadCount + ' unread · ' + active.length + ' total';
   if (!filtered.length) {
     list.innerHTML = `<div class="empty"><div class="icon">${q||activeCat||readFilter?'⌕':'🔖'}</div><p>${q||activeCat||readFilter?'No links match.':'No saved links yet.<br>Paste a link above, or share one into the app.'}</p></div>`;
     return;
@@ -1182,7 +1334,8 @@ function setupSwipe() {
     bg = document.createElement('div');
     bg.className = 'swipe-bg';
     bg.style.cssText = 'position:absolute;inset:0;background:#ff3355;display:flex;align-items:center;justify-content:flex-end;padding-right:20px;z-index:0;opacity:0;pointer-events:none';
-    bg.innerHTML = '<span style="font-size:13px;font-weight:800;color:white">🗑 DELETE</span>';
+    bg.style.cssText = 'position:absolute;inset:0;background:var(--accent3);display:flex;align-items:center;justify-content:flex-end;padding-right:20px;z-index:0;opacity:0;pointer-events:none';
+    bg.innerHTML = '<span style="font-size:13px;font-weight:800;color:#0d0d15">🗄 ARCHIVE</span>';
     row.appendChild(bg);
   }, {passive:true});
 
@@ -1200,11 +1353,11 @@ function setupSwipe() {
     if (moved && Math.abs(dx) > T) {
       const id = parseInt(row.dataset.id);
       const thisRow = row;
-      // snap the row back first — the confirm dialog decides the real outcome
-      thisRow.style.transition = 'transform 0.25s cubic-bezier(0.4,0,0.2,1)';
-      thisRow.style.transform = 'translateX(0)';
-      if (bg) { const b=bg; b.style.transition='opacity 0.2s'; b.style.opacity='0'; setTimeout(()=>b.remove(),220); bg=null; }
-      deleteLink(id);
+      thisRow.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+      thisRow.style.transform = 'translateX(-110%)';
+      thisRow.style.opacity = '0';
+      if (bg) { const b=bg; setTimeout(()=>b.remove(),300); bg=null; }
+      setTimeout(() => { archiveLinkWithUndo(id); }, 280);
     } else {
       row.style.transition = 'transform 0.25s cubic-bezier(0.4,0,0.2,1)';
       row.style.transform = 'translateX(0)';
@@ -1241,6 +1394,7 @@ function showUndoToast(removed, idx) {
 }
 
 load();
+applyTheme();
 loadHighlights();
 render();
 buildCatFilters();
