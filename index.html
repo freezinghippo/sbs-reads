@@ -191,7 +191,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v16</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v17</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <span class="count" id="count">0 links</span>
     <button class="hamburger-btn" onclick="openMenu()">☰</button>
@@ -476,7 +476,7 @@ function askConfirm(message, onYes, okLabel) {
   const ok = document.getElementById('confirmOk');
   ok.textContent = okLabel || 'Delete';
   _confirmAction = onYes;
-  ok.onclick = () => { closeConfirm(); if (_confirmAction) _confirmAction(); };
+  ok.onclick = () => { const act = _confirmAction; closeConfirm(); if (act) act(); };
   document.getElementById('confirmOverlay').classList.add('open');
 }
 function closeConfirm() {
@@ -825,9 +825,9 @@ function speakNext() {
   if (speechIdx >= speechChunks.length) { endPlayback(); return; }
   if (!_suppressSeekUpdate) updateSeek();
   const u = new SpeechSynthesisUtterance(speechChunks[speechIdx]);
-  // iOS speech engine runs noticeably faster for the same rate value — scale it down
+  // iOS speech engine runs much faster for the same rate value — scale hard
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  u.rate = isIOS ? (1 + (speechRate - 1) * 0.55) : speechRate;
+  u.rate = isIOS ? (0.85 + (speechRate - 1) * 0.35) : speechRate;
   u.pitch = 1.0; u.lang = 'en-US';
   // token so a canceled/replaced utterance can't advance the index
   const myToken = ++speechToken;
