@@ -120,6 +120,9 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .reader-star:active { background:rgba(255,224,102,0.2); }
 .reader-star.saved { background:#ffe066; color:#0d0d15; }
 .summary-meta { font-size:11px; color:var(--text3); font-weight:600; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+.reader-progress { height:3px; background:transparent; flex-shrink:0; position:relative; }
+.reader-progress-fill { height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent3)); transition:width 0.1s linear; }
+.article-readtime { font-size:12px; color:var(--text3); font-weight:700; margin-bottom:16px; }
 
 /* HAMBURGER + MENU */
 .hamburger-btn { width:36px; height:34px; border-radius:9px; border:1px solid var(--border); background:var(--surface); color:var(--text2); font-size:17px; cursor:pointer; }
@@ -196,7 +199,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v21</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v22</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <span class="count" id="count">0 links</span>
     <button class="hamburger-btn" id="refreshBtn" onclick="manualRefresh()" title="Refresh / sync now">⟳</button>
@@ -245,7 +248,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 
 <div class="search-wrap">
   <span class="search-icon">⌕</span>
-  <input class="search-input" id="searchInput" placeholder="search saved links..." oninput="render()">
+  <input class="search-input" id="searchInput" placeholder="search titles, content & highlights..." oninput="render()">
 </div>
 
 <div class="read-filters">
@@ -310,7 +313,8 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
     <button class="audio-skip" onclick="skipChunk(1)">⏭</button>
     <span class="audio-pos" id="audioPos">0%</span>
   </div>
-  <div class="reader-body" id="readerBody"></div>
+  <div class="reader-progress"><div class="reader-progress-fill" id="readerProgress"></div></div>
+  <div class="reader-body" id="readerBody" onscroll="updateReadProgress()"></div>
 </div>
 
 <!-- HIGHLIGHTS VIEW -->
@@ -817,7 +821,11 @@ function render() {
     if (activeCat && l.cat !== activeCat) return false;
     if (readFilter === 'unread' && l.read) return false;
     if (readFilter === 'read' && !l.read) return false;
-    if (q && !(l.url.toLowerCase().includes(q) || l.domain.toLowerCase().includes(q) || (l.title||'').toLowerCase().includes(q))) return false;
+    if (q) {
+      const inLink = l.url.toLowerCase().includes(q) || l.domain.toLowerCase().includes(q) || (l.title||'').toLowerCase().includes(q) || (l.snippet||'').toLowerCase().includes(q);
+      const inHl = highlights.some(h => h.url === l.url && h.text.toLowerCase().includes(q));
+      if (!inLink && !inHl) return false;
+    }
     return true;
   });
   filtered = sortLinks(filtered);
@@ -875,12 +883,22 @@ function openReader(l) {
   document.getElementById('readerBody').innerHTML =
     '<div class="reader-loading"><div class="reader-spinner"></div><div>Fetching article…</div></div>';
   document.getElementById('reader').classList.add('open');
+  const pb = document.getElementById('readerProgress'); if (pb) pb.style.width = '0%';
   fetchArticle(l);
 }
 
 function closeReader() {
   stopSpeech();
   document.getElementById('reader').classList.remove('open');
+}
+
+function updateReadProgress() {
+  const body = document.getElementById('readerBody');
+  const bar = document.getElementById('readerProgress');
+  if (!body || !bar) return;
+  const max = body.scrollHeight - body.clientHeight;
+  const pct = max > 0 ? Math.min(100, (body.scrollTop / max) * 100) : 0;
+  bar.style.width = pct + '%';
 }
 
 // ---- TEXT-TO-SPEECH (free, phone's built-in voice) ------------------------
@@ -1163,16 +1181,22 @@ async function fetchArticle(l) {
     // store read-time estimate (words / 225 wpm) for the list
     const words = (data.text.match(/\S+/g) || []).length;
     if (words && l.words !== words) { l.words = words; save(); render(); }
+    // store a searchable snippet (first ~1500 chars) for full-text search
+    const snip = data.text.slice(0, 1500);
+    if (l.snippet !== snip) { l.snippet = snip; save(); }
     // self-correct / fill category now that we have real article text
     if (!l.cat || l.cat === 'Other') {
       categorizeLink(l, data.text);
     }
+    const mins = Math.max(1, Math.round(words / 225));
     readerState.fullHtml =
       '<div class="reader-title">' + esc(readerState.title) + '</div>' +
+      '<div class="article-readtime">⏱ ' + mins + ' min read · ' + words.toLocaleString() + ' words</div>' +
       '<div class="reader-content">' + mdToHtml(data.text) + '</div>';
     if (readerState.view === 'full') {
       document.getElementById('readerBody').innerHTML = readerState.fullHtml;
       document.getElementById('readerBody').scrollTop = 0;
+      updateReadProgress();
     }
   } catch(e) {
     if (currentReaderUrl === l.url) showReaderError(l);
