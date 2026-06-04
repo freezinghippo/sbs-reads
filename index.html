@@ -127,6 +127,8 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .export-btn-small { width:auto; margin:6px 0 0; padding:7px 13px; font-size:12px; background:var(--surface2); color:var(--accent3); }
 .q-check { width:24px; height:24px; border-radius:50%; border:2px solid var(--border); flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#0d0d15; font-size:13px; font-weight:900; cursor:pointer; }
 .q-check.on { background:var(--accent3); border-color:var(--accent3); }
+.queue-divider { font-size:18px; font-weight:900; color:var(--accent3); margin:26px 0 14px; padding-top:18px; border-top:2px solid var(--border); }
+.queue-skip { font-size:13px; color:var(--text3); font-style:italic; margin:8px 0; }
 
 /* HAMBURGER + MENU */
 .hamburger-btn { width:36px; height:34px; border-radius:9px; border:1px solid var(--border); background:var(--surface); color:var(--text2); font-size:17px; cursor:pointer; }
@@ -205,7 +207,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v25</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v26</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <span class="count" id="count">0 links</span>
     <button class="hamburger-btn" id="refreshBtn" onclick="manualRefresh()" title="Refresh / sync now">⟳</button>
@@ -952,79 +954,80 @@ function toggleQueueCheck(id) {
 // Play the queue: only the checked items, fetch each, read, then advance
 let queueToPlay = [];
 let queuePlayIndex = 0;
+
 async function playQueue() {
-  // gather checked items (default all checked)
-  queueToPlay = queue.filter(id => queueChecked[id] !== false);
-  if (!queueToPlay.length) { showToast('No items selected'); return; }
+  const ids = queue.filter(id => queueChecked[id] !== false);
+  if (!ids.length) { showToast('No items selected'); return; }
   closeQueue();
-  queuePlaying = true;
-  queuePlayIndex = 0;
-  queuePos = 0;
-  playQueueItem();
-}
-async function playQueueItem() {
-  if (!queuePlaying || queuePlayIndex >= queueToPlay.length) { queuePlaying = false; speaking=false; clearHighlight(); showToast('Queue finished'); return; }
-  // cancel any leftover speech from the previous item
-  try { window.speechSynthesis.cancel(); } catch(e) {}
-  speaking = false;
-  const id = queueToPlay[queuePlayIndex];
-  const l = links.find(x=>x.id===id);
-  if (!l) { queuePlayIndex++; playQueueItem(); return; }
-  // open the reader on this item and auto-start listening
-  openReader(l);
-  // wait for article text to load, then speak; when speech ends, advance
-  let waited = 0;
-  const waitForText = setInterval(() => {
-    waited += 300;
-    if (readerState.fullText) {
-      clearInterval(waitForText);
-      startQueueSpeech();
-    } else if (waited > 12000) {        // give up after 12s, skip to next
-      clearInterval(waitForText);
-      queuePlayIndex++; playQueueItem();
+  const sources = ids.map(id => links.find(l=>l.id===id)).filter(Boolean);
+
+  // Show a loading screen in the reader while we gather all articles
+  currentReaderLink = sources[0];
+  document.getElementById('readerDomain').textContent = '▶ Building queue…';
+  document.getElementById('readerOrig').onclick = () => {};
+  setToggle('full');
+  document.getElementById('readerBody').innerHTML =
+    '<div class="reader-loading"><div class="reader-spinner"></div><div>Loading ' + sources.length + ' articles…</div></div>';
+  document.getElementById('reader').classList.add('open');
+  armBack();
+
+  // Fetch each article's text (in order), stitch into one combined document
+  let combinedChunks = [];
+  let combinedHtml = '';
+  let loaded = 0;
+  for (const l of sources) {
+    document.getElementById('readerBody').innerHTML =
+      '<div class="reader-loading"><div class="reader-spinner"></div><div>Loading article ' + (loaded+1) + ' of ' + sources.length + '…</div></div>';
+    let text = '', title = l.title || l.domain;
+    try {
+      const resp = await fetch(WORKER + '/article?url=' + encodeURIComponent(l.url));
+      const data = await resp.json();
+      if (data.ok && data.text) { text = data.text; title = decodeEntities(data.title || title); }
+    } catch(e) {}
+    loaded++;
+    if (!l.read) { l.read = true; }
+    // section header (spoken + shown)
+    const headerChunk = (combinedChunks.length ? 'Next article. ' : '') + title + '. ';
+    combinedHtml += '<div class="queue-divider">' + esc(title) + '</div>';
+    combinedChunks.push({ text: headerChunk, divider: true });
+    if (text) {
+      const sentences = splitForSpeech(plainFromText(text));
+      sentences.forEach(s => combinedChunks.push({ text: s }));
+    } else {
+      const skip = 'This article could not be loaded. Skipping.';
+      combinedChunks.push({ text: skip });
+      combinedHtml += '<div class="queue-skip">⚠ Couldn\'t load this one — skipped</div>';
     }
-  }, 300);
-}
-function startQueueSpeech() {
-  readerState.view = 'full';
-  if (readerState.chunks && readerState.chunks.length) {
-    speechChunks = readerState.chunks;
-  } else {
-    const text = plainTextForSpeech();
-    if (!text) { queuePlayIndex++; playQueueItem(); return; }
-    speechChunks = splitForSpeech(text);
   }
-  speechIdx = 0; speaking = true; paused = false;
+  save();
+
+  // Build the on-screen spans aligned to chunks
+  let spans = '';
+  combinedChunks.forEach((c, i) => {
+    if (c.divider) return; // divider already rendered as its own block in order below
+  });
+  // Rebuild HTML in true order (dividers + sentence spans interleaved)
+  combinedHtml = '';
+  combinedChunks.forEach((c, i) => {
+    if (c.divider) combinedHtml += '<div class="queue-divider" id="rcchunk-'+i+'">'+esc(c.text)+'</div>';
+    else combinedHtml += '<span class="rc-chunk" id="rcchunk-'+i+'">'+esc(c.text)+' </span>';
+  });
+
+  readerState = { title:'Listening Queue', fullText:'(queue)', view:'full', chunks: combinedChunks.map(c=>c.text) };
+  document.getElementById('readerDomain').textContent = '▶ Queue · ' + sources.length + ' articles';
+  document.getElementById('readerBody').innerHTML =
+    '<div class="reader-title">▶ Listening Queue</div>' +
+    '<div class="article-readtime">' + sources.length + ' articles · read straight through</div>' +
+    '<div class="reader-content" id="readerContent">' + combinedHtml + '</div>';
+  document.getElementById('readerBody').scrollTop = 0;
+
+  // Now play the whole thing as ONE continuous read (no cross-article restart)
+  speechChunks = readerState.chunks;
+  speechIdx = 0; speaking = true; paused = false; queuePlaying = false;
   setListenBtn(true);
   document.getElementById('audioBar').style.display = 'flex';
-  updateQueueIndicator();
-  speakQueueNext();
-}
-function speakQueueNext() {
-  if (!speaking || paused) return;
-  if (speechIdx >= speechChunks.length) {
-    // done with this article — advance the queue
-    clearHighlight();
-    if (queuePlaying) { queuePlayIndex++; playQueueItem(); return; }
-    endPlayback(); return;
-  }
   updateSeek();
-  highlightChunk(speechIdx);
-  const u = new SpeechSynthesisUtterance(speechChunks[speechIdx]);
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  u.rate = isIOS ? (0.85 + (speechRate - 1) * 0.35) : speechRate;
-  u.pitch = 1.0; u.lang = 'en-US';
-  const myToken = ++speechToken;
-  u.onend = () => { if (speaking && !paused && myToken === speechToken) { speechIdx++; speakQueueNext(); } };
-  u.onerror = () => { if (speaking && !paused && myToken === speechToken) { speechIdx++; speakQueueNext(); } };
-  window.speechSynthesis.speak(u);
-}
-function updateQueueIndicator() {
-  if (!queuePlaying) return;
-  const total = queueToPlay.length || queue.length;
-  const n = queuePlayIndex + 1;
-  const dom = document.getElementById('readerDomain');
-  if (dom) dom.textContent = '▶ Playing ' + n + ' of ' + total;
+  speakNext();
 }
 
 function openReader(l) {
@@ -1105,15 +1108,25 @@ function plainTextForSpeech() {
 }
 
 function splitForSpeech(text) {
-  // break into sentence-ish chunks; some engines choke on very long strings
+  // one sentence per chunk so the read-along highlight tracks tightly
   const parts = text.match(/[^.!?]+[.!?]+|\S[^.!?]*$/g) || [text];
   const chunks = [];
-  let buf = '';
-  for (const p of parts) {
-    if ((buf + p).length > 220) { if (buf) chunks.push(buf.trim()); buf = p; }
-    else buf += p;
+  for (let p of parts) {
+    p = p.trim();
+    if (!p) continue;
+    // only break a sentence if it's extremely long (engine limits ~300+)
+    if (p.length > 300) {
+      const sub = p.match(/[^,;:]+[,;:]+|\S[^,;:]*$/g) || [p];
+      let buf = '';
+      for (const s of sub) {
+        if ((buf + s).length > 300) { if (buf) chunks.push(buf.trim()); buf = s; }
+        else buf += s;
+      }
+      if (buf.trim()) chunks.push(buf.trim());
+    } else {
+      chunks.push(p);
+    }
   }
-  if (buf.trim()) chunks.push(buf.trim());
   return chunks;
 }
 
