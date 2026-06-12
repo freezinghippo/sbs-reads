@@ -159,6 +159,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .reader-content { font-size:16px; line-height:1.75; color:var(--text2); -webkit-user-select:text; user-select:text; }
 .rc-chunk { transition: background 0.2s, color 0.2s; border-radius:4px; }
 .rc-chunk.reading { background:rgba(255,108,157,0.22); color:var(--text); box-shadow:0 0 0 3px rgba(255,108,157,0.22); }
+.rc-para { margin-bottom:16px; }
 .reader-content p { margin-bottom:16px; }
 .reader-content h1,.reader-content h2,.reader-content h3 { color:var(--text)!important; font-weight:800!important; line-height:1.3; margin:24px 0 10px; }
 .reader-content h1 { font-size:21px; } .reader-content h2 { font-size:18px; } .reader-content h3 { font-size:16px; }
@@ -207,7 +208,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 <body>
 
 <div class="header">
-  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v26</span></div>
+  <div class="logo"><span class="logo-sb">SB's </span><span class="logo-x">Reads</span><span style="font-size:9px;color:var(--text3);font-weight:600;margin-left:6px">v27</span></div>
   <div style="display:flex;align-items:center;gap:8px">
     <span class="count" id="count">0 links</span>
     <button class="hamburger-btn" id="refreshBtn" onclick="manualRefresh()" title="Refresh / sync now">⟳</button>
@@ -991,7 +992,7 @@ async function playQueue() {
     combinedHtml += '<div class="queue-divider">' + esc(title) + '</div>';
     combinedChunks.push({ text: headerChunk, divider: true });
     if (text) {
-      const sentences = splitForSpeech(plainFromText(text));
+      const sentences = splitForSpeech(plainFromText(decodeEntities(text)));
       sentences.forEach(s => combinedChunks.push({ text: s }));
     } else {
       const skip = 'This article could not be loaded. Skipping.';
@@ -1098,6 +1099,54 @@ function plainFromText(src) {
     .replace(/\n{2,}/g, '. ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// normalize for comparing a paragraph against the title (dedup)
+function normForCompare(s) {
+  return decodeEntities(s || '').toLowerCase()
+    .replace(/\s*\|\s*cnn\s*$/i, '')      // strip trailing "| CNN" etc.
+    .replace(/[^a-z0-9 ]/g, '')           // drop punctuation
+    .replace(/\s+/g, ' ').trim();
+}
+
+// Build reader HTML (paragraphs preserved, entities decoded) plus a parallel
+// chunks[] (one sentence each) for read-along highlighting. Spans get ids
+// rcchunk-0, rcchunk-1, ... matching chunk indices.
+function buildReaderBody(rawText, title) {
+  const titleNorm = normForCompare(title);
+  // split into paragraphs on blank lines; fall back to single block
+  let paras = decodeEntities(rawText || '')
+    .replace(/\r/g, '')
+    .split(/\n{2,}/)
+    .map(p => p.replace(/^#{1,6}\s+/, '').replace(/^[->*]\s+/, '').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/\*([^*]+)\*/g,'$1').replace(/`+/g,'').replace(/\s+/g,' ').trim())
+    .filter(p => p.length > 0);
+
+  // drop a leading paragraph that just repeats/echoes the title
+  const firstWords = (s, n) => normForCompare(s).split(' ').slice(0, n).join(' ');
+  while (paras.length) {
+    const n = normForCompare(paras[0]);
+    if (!n) { paras.shift(); continue; }
+    // dup if exact, or if the first 5 words match the title's first 5 words
+    const sameStart = titleNorm && firstWords(paras[0], 5) && firstWords(paras[0], 5) === firstWords(title, 5);
+    const isDup = n === titleNorm || sameStart;
+    if (isDup) { paras.shift(); } else break;
+  }
+
+  const chunks = [];
+  let html = '';
+  let idx = 0;
+  for (const p of paras) {
+    const sentences = splitForSpeech(p);
+    if (!sentences.length) continue;
+    html += '<p class="rc-para">';
+    for (const s of sentences) {
+      chunks.push(s);
+      html += '<span class="rc-chunk" id="rcchunk-' + idx + '">' + esc(s) + ' </span>';
+      idx++;
+    }
+    html += '</p>';
+  }
+  return { html, chunks };
 }
 
 function plainTextForSpeech() {
@@ -1409,13 +1458,14 @@ async function fetchArticle(l) {
       categorizeLink(l, data.text);
     }
     const mins = Math.max(1, Math.round(words / 225));
-    // build body as sentence spans that line up with speech chunks (for read-along highlight)
-    readerState.chunks = splitForSpeech(plainFromText(data.text));
-    const spansHtml = readerState.chunks.map((c,i) => '<span class="rc-chunk" id="rcchunk-'+i+'">'+esc(c)+' </span>').join('');
+    // Build the article as paragraphs (preserved) with sentence-spans inside,
+    // and a parallel chunks[] for the read-along highlight + speech.
+    const built = buildReaderBody(data.text, readerState.title);
+    readerState.chunks = built.chunks;
     readerState.fullHtml =
-      '<div class="reader-title">' + esc(readerState.title) + '</div>' +
+      '<div class="reader-title">' + esc(decodeEntities(readerState.title)) + '</div>' +
       '<div class="article-readtime">⏱ ' + mins + ' min read · ' + words.toLocaleString() + ' words</div>' +
-      '<div class="reader-content" id="readerContent">' + spansHtml + '</div>';
+      '<div class="reader-content" id="readerContent">' + built.html + '</div>';
     if (readerState.view === 'full') {
       document.getElementById('readerBody').innerHTML = readerState.fullHtml;
       document.getElementById('readerBody').scrollTop = 0;
